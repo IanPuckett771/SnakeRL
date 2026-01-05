@@ -81,7 +81,7 @@ SnakeRL/
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                  Frontend (Browser)                  │
+│                  Frontend (Browser)                 │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  │
 │  │   Canvas    │  │   Controls  │  │ Leaderboard │  │
 │  │  (Game UI)  │  │ (WASD/Arrow)│  │  (Top 10)   │  │
@@ -89,7 +89,7 @@ SnakeRL/
 └────────────────────────┬────────────────────────────┘
                          │ WebSocket
 ┌────────────────────────┴────────────────────────────┐
-│                 Backend (Python/FastAPI)             │
+│                 Backend (Python/FastAPI)            │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  │
 │  │ Game Engine │  │   Agent     │  │ Leaderboard │  │
 │  │   (Logic)   │  │  Interface  │  │   (File)    │  │
