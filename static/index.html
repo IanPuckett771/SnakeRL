@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SnakeRL</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+
+        h1 {
+            font-size: 3rem;
+            margin-bottom: 20px;
+            text-shadow: 0 0 20px rgba(0, 255, 0, 0.5);
+            color: #00ff00;
+        }
+
+        .container {
+            display: flex;
+            gap: 30px;
+            flex-wrap: wrap;
+            justify-content: center;
+            max-width: 1200px;
+            width: 100%;
+        }
+
+        .panel {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .settings-panel {
+            width: 280px;
+        }
+
+        .settings-panel h2 {
+            margin-bottom: 20px;
+            font-size: 1.5rem;
+            border-bottom: 2px solid #00ff00;
+            padding-bottom: 10px;
+        }
+
+        .mode-toggle {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .mode-btn {
+            flex: 1;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+        }
+
+        .mode-btn.active {
+            background: #00ff00;
+            color: #1a1a2e;
+        }
+
+        .mode-btn:hover:not(.active) {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .setting-group {
+            margin-bottom: 15px;
+        }
+
+        .setting-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+            color: #ccc;
+        }
+
+        .setting-group input[type="number"],
+        .setting-group select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.3);
+            color: #fff;
+            font-size: 1rem;
+        }
+
+        .setting-group input[type="color"] {
+            width: 100%;
+            height: 45px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            background: transparent;
+        }
+
+        .checkpoint-group {
+            display: none;
+        }
+
+        .checkpoint-group.visible {
+            display: block;
+        }
+
+        #startBtn {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, #00ff00, #00cc00);
+            border: none;
+            border-radius: 8px;
+            color: #1a1a2e;
+            font-size: 1.2rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            margin-top: 10px;
+        }
+
+        #startBtn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(0, 255, 0, 0.4);
+        }
+
+        #startBtn:active {
+            transform: translateY(0);
+        }
+
+        .game-area {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        #gameCanvas {
+            background: #000;
+            border-radius: 10px;
+            border: 3px solid #00ff00;
+            box-shadow: 0 0 30px rgba(0, 255, 0, 0.3);
+        }
+
+        .score-display {
+            margin-top: 15px;
+            font-size: 1.5rem;
+            text-align: center;
+        }
+
+        .score-display span {
+            color: #00ff00;
+            font-weight: bold;
+            font-size: 2rem;
+        }
+
+        .leaderboard-panel {
+            width: 250px;
+        }
+
+        .leaderboard-panel h2 {
+            margin-bottom: 20px;
+            font-size: 1.5rem;
+            border-bottom: 2px solid #ffd700;
+            padding-bottom: 10px;
+            color: #ffd700;
+        }
+
+        .leaderboard-list {
+            list-style: none;
+        }
+
+        .leaderboard-list li {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            transition: background 0.2s;
+        }
+
+        .leaderboard-list li:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .leaderboard-list li:first-child {
+            color: #ffd700;
+            font-weight: bold;
+        }
+
+        .leaderboard-list li:nth-child(2) {
+            color: #c0c0c0;
+        }
+
+        .leaderboard-list li:nth-child(3) {
+            color: #cd7f32;
+        }
+
+        .leaderboard-rank {
+            width: 30px;
+            color: #888;
+        }
+
+        .leaderboard-name {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .leaderboard-score {
+            font-weight: bold;
+            color: #00ff00;
+        }
+
+        /* Game Over Overlay */
+        .game-over-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .game-over-overlay.visible {
+            display: flex;
+        }
+
+        .game-over-content {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            padding: 40px;
+            border-radius: 20px;
+            text-align: center;
+            border: 2px solid #00ff00;
+            box-shadow: 0 0 50px rgba(0, 255, 0, 0.3);
+            max-width: 400px;
+            width: 90%;
+        }
+
+        .game-over-content h2 {
+            font-size: 2.5rem;
+            color: #ff4444;
+            margin-bottom: 20px;
+            text-shadow: 0 0 20px rgba(255, 68, 68, 0.5);
+        }
+
+        .final-score {
+            font-size: 1.5rem;
+            margin-bottom: 25px;
+        }
+
+        .final-score span {
+            color: #00ff00;
+            font-size: 3rem;
+            font-weight: bold;
+            display: block;
+            margin-top: 10px;
+        }
+
+        .name-input-group {
+            margin-bottom: 20px;
+        }
+
+        .name-input-group input {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            color: #fff;
+            font-size: 1.1rem;
+            text-align: center;
+        }
+
+        .name-input-group input:focus {
+            outline: none;
+            border-color: #00ff00;
+        }
+
+        .overlay-buttons {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .overlay-btn {
+            padding: 15px 30px;
+            border: none;
+            border-radius: 10px;
+            font-size: 1.1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        #submitScoreBtn {
+            background: linear-gradient(135deg, #ffd700, #ffaa00);
+            color: #1a1a2e;
+        }
+
+        #playAgainBtn {
+            background: linear-gradient(135deg, #00ff00, #00cc00);
+            color: #1a1a2e;
+        }
+
+        .overlay-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(255, 255, 255, 0.2);
+        }
+
+        .close-btn {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background: none;
+            border: none;
+            color: #888;
+            font-size: 2rem;
+            cursor: pointer;
+            line-height: 1;
+            padding: 0;
+            transition: color 0.2s;
+        }
+
+        .close-btn:hover {
+            color: #fff;
+        }
+
+        .game-over-content {
+            position: relative;
+        }
+
+        .connection-status {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+
+        .connection-status.connected {
+            background: rgba(0, 255, 0, 0.2);
+            color: #00ff00;
+        }
+
+        .connection-status.disconnected {
+            background: rgba(255, 68, 68, 0.2);
+            color: #ff4444;
+        }
+
+        .connection-status.connecting {
+            background: rgba(255, 215, 0, 0.2);
+            color: #ffd700;
+        }
+    </style>
+</head>
+<body>
+    <div class="connection-status disconnected" id="connectionStatus">Disconnected</div>
+
+    <h1>SnakeRL</h1>
+
+    <div class="container">
+        <!-- Settings Panel -->
+        <div class="panel settings-panel">
+            <h2>Settings</h2>
+
+            <div class="mode-toggle">
+                <button class="mode-btn active" id="playModeBtn" data-mode="play">Play</button>
+                <button class="mode-btn" id="watchModeBtn" data-mode="agent">Watch Agent</button>
+            </div>
+
+            <div class="setting-group">
+                <label for="boardWidth">Board Width</label>
+                <input type="number" id="boardWidth" value="20" min="10" max="50">
+            </div>
+
+            <div class="setting-group">
+                <label for="boardHeight">Board Height</label>
+                <input type="number" id="boardHeight" value="20" min="10" max="50">
+            </div>
+
+            <div class="setting-group">
+                <label for="snakeColor">Snake Color</label>
+                <input type="color" id="snakeColor" value="#00ff00">
+            </div>
+
+            <div class="setting-group">
+                <label for="gameSpeed">Speed</label>
+                <select id="gameSpeed">
+                    <option value="0.25">Slow</option>
+                    <option value="0.15" selected>Normal</option>
+                    <option value="0.08">Fast</option>
+                    <option value="0.04">Insane</option>
+                </select>
+            </div>
+
+            <div class="setting-group checkpoint-group" id="checkpointGroup">
+                <label for="checkpoint">Checkpoint</label>
+                <select id="checkpoint">
+                    <option value="">Select a checkpoint...</option>
+                </select>
+            </div>
+
+            <button id="startBtn">Start Game</button>
+        </div>
+
+        <!-- Game Area -->
+        <div class="game-area">
+            <canvas id="gameCanvas" width="400" height="400"></canvas>
+            <div class="score-display">
+                Score: <span id="currentScore">0</span>
+            </div>
+        </div>
+
+        <!-- Leaderboard Panel -->
+        <div class="panel leaderboard-panel">
+            <h2>Leaderboard</h2>
+            <ul class="leaderboard-list" id="leaderboardList">
+                <li>
+                    <span class="leaderboard-rank">-</span>
+                    <span class="leaderboard-name">No scores yet</span>
+                    <span class="leaderboard-score"></span>
+                </li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- Game Over Overlay -->
+    <div class="game-over-overlay" id="gameOverOverlay">
+        <div class="game-over-content">
+            <button class="close-btn" id="closeOverlayBtn">&times;</button>
+            <h2>Game Over!</h2>
+            <div class="final-score">
+                Your Score
+                <span id="finalScore">0</span>
+            </div>
+            <div class="name-input-group">
+                <input type="text" id="playerName" placeholder="Enter your name" maxlength="20">
+            </div>
+            <div class="overlay-buttons">
+                <button class="overlay-btn" id="submitScoreBtn">Submit Score</button>
+                <button class="overlay-btn" id="playAgainBtn">Play Again</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/websocket.js"></script>
+    <script src="/static/js/game.js"></script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+# SnakeRL Dependencies
+
+# Web Framework
+fastapi
+
+# ASGI Server
+uvicorn[standard]
+
+# WebSocket Support
+websockets
