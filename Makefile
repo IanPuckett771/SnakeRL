@@ -33,15 +33,20 @@ install:
 	@echo "Installation complete!"
 	@echo "Activate the virtual environment with: source venv/bin/activate"
 
+# Find available port (default 8000, or next available)
+PORT ?= $(shell python3 -c "import socket; s=socket.socket(); port=8000; exec('while True:\\n try:\\n  s.bind((\"0.0.0.0\",port)); s.close(); break\\n except: port+=1'); print(port)")
+
 # Run development server with hot reload
 dev:
-	@echo "Starting development server..."
-	uvicorn main:app --reload --host 0.0.0.0 --port 8000
+	@echo "Starting development server on port $(PORT)..."
+	@if [ "$(PORT)" != "8000" ]; then echo "Port 8000 was in use, using $(PORT) instead"; fi
+	uvicorn main:app --reload --host 0.0.0.0 --port $(PORT)
 
 # Run production server
 run:
-	@echo "Starting production server..."
-	uvicorn main:app --host 0.0.0.0 --port 8000
+	@echo "Starting production server on port $(PORT)..."
+	@if [ "$(PORT)" != "8000" ]; then echo "Port 8000 was in use, using $(PORT) instead"; fi
+	uvicorn main:app --host 0.0.0.0 --port $(PORT)
 
 # Clean up cache files and build artifacts
 clean:

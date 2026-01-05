@@ -298,7 +298,40 @@ if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
+def find_available_port(start_port: int = 8000, max_attempts: int = 100) -> int:
+    """Find an available port starting from start_port.
+
+    Args:
+        start_port: Port number to start searching from
+        max_attempts: Maximum number of ports to try
+
+    Returns:
+        An available port number
+
+    Raises:
+        RuntimeError: If no available port is found
+    """
+    import socket
+
+    for port in range(start_port, start_port + max_attempts):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(("0.0.0.0", port))
+                return port
+        except OSError:
+            continue
+
+    raise RuntimeError(f"No available port found in range {start_port}-{start_port + max_attempts - 1}")
+
+
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    default_port = 8000
+    port = int(os.environ.get("PORT", 0)) or find_available_port(default_port)
+
+    if port != default_port:
+        print(f"Port {default_port} is in use, using port {port} instead")
+
+    print(f"Starting server at http://localhost:{port}")
+    uvicorn.run(app, host="0.0.0.0", port=port)
