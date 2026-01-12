@@ -1,0 +1,21 @@
+game: snake
+algorithm: ppo
+
+environment:
+  width: 20
+  height: 20
+
+agent:
+  learning_rate: 0.0003
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  entropy_coef: 0.01
+  value_coef: 0.5
+  max_grad_norm: 0.5
+  rollout_buffer_size: 2048
+  batch_size: 64
+  n_epochs: 10
+  hidden_dim: 256
+
+rollout_size: 2048

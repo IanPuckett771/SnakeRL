@@ -1,5 +1,6 @@
+from __future__ import annotations
+
 import random
-from typing import Tuple, Optional
 
 from .state import GameState
 
@@ -30,8 +31,8 @@ class SnakeGame:
         """
         self.width = width
         self.height = height
-        self.snake: list[Tuple[int, int]] = []
-        self.food: Tuple[int, int] = (0, 0)
+        self.snake: list[tuple[int, int]] = []
+        self.food: tuple[int, int] = (0, 0)
         self.direction: str = "right"
         self.score: int = 0
         self.game_over: bool = False
@@ -50,7 +51,7 @@ class SnakeGame:
         center_y = self.height // 2
 
         self.snake = [
-            (center_x, center_y),      # Head
+            (center_x, center_y),  # Head
             (center_x - 1, center_y),  # Body
             (center_x - 2, center_y),  # Tail
         ]
@@ -69,10 +70,7 @@ class SnakeGame:
         # Get all empty cells
         snake_set = set(self.snake)
         empty_cells = [
-            (x, y)
-            for x in range(self.width)
-            for y in range(self.height)
-            if (x, y) not in snake_set
+            (x, y) for x in range(self.width) for y in range(self.height) if (x, y) not in snake_set
         ]
 
         if empty_cells:
@@ -81,7 +79,7 @@ class SnakeGame:
             # No empty cells (snake fills board - win condition)
             self.food = (-1, -1)
 
-    def _check_collision(self, position: Tuple[int, int]) -> bool:
+    def _check_collision(self, position: tuple[int, int]) -> bool:
         """Check if position collides with walls or snake body.
 
         Args:
@@ -102,7 +100,7 @@ class SnakeGame:
 
         return False
 
-    def step(self, action: Optional[str] = None) -> Tuple[GameState, float, bool]:
+    def step(self, action: str | None = None) -> tuple[GameState, float, bool]:
         """Process one game step with the given action.
 
         Args:

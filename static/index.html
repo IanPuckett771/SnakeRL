@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SnakeRL</title>
+    <title>RL Game Hub</title>
     <style>
         * {
             box-sizing: border-box;
@@ -121,6 +121,14 @@
         }
 
         .checkpoint-group.visible {
+            display: block;
+        }
+
+        .opponent-group {
+            display: none;
+        }
+
+        .opponent-group.visible {
             display: block;
         }
 
@@ -382,12 +390,21 @@
 <body>
     <div class="connection-status disconnected" id="connectionStatus">Disconnected</div>
 
-    <h1>SnakeRL</h1>
+    <h1>RL Game Hub</h1>
 
     <div class="container">
         <!-- Settings Panel -->
         <div class="panel settings-panel">
             <h2>Settings</h2>
+
+            <div class="setting-group">
+                <label for="gameSelect">Select Game</label>
+                <select id="gameSelect">
+                    <option value="snake" selected>Snake</option>
+                    <option value="tron">Tron (Light Cycles)</option>
+                    <option value="tank">Tank Battle</option>
+                </select>
+            </div>
 
             <div class="mode-toggle">
                 <button class="mode-btn active" id="playModeBtn" data-mode="play">Play</button>
@@ -404,7 +421,7 @@
                 <input type="number" id="boardHeight" value="20" min="10" max="50">
             </div>
 
-            <div class="setting-group">
+            <div class="setting-group" id="snakeColorGroup">
                 <label for="snakeColor">Snake Color</label>
                 <input type="color" id="snakeColor" value="#00ff00">
             </div>
@@ -423,6 +440,13 @@
                 <label for="checkpoint">Checkpoint</label>
                 <select id="checkpoint">
                     <option value="">Select a checkpoint...</option>
+                </select>
+            </div>
+
+            <div class="setting-group opponent-group" id="opponentGroup">
+                <label for="opponentSelect">Opponent AI</label>
+                <select id="opponentSelect">
+                    <option value="" selected>Simple AI (Default)</option>
                 </select>
             </div>
 
