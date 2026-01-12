@@ -1,13 +1,14 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import List, Tuple
 
 
 @dataclass
 class GameState:
     """Represents the current state of a Snake game."""
 
-    snake: List[Tuple[int, int]]  # List of (x, y) tuples, head first
-    food: Tuple[int, int]  # (x, y) position of food
+    snake: list[tuple[int, int]]  # List of (x, y) tuples, head first
+    food: tuple[int, int]  # (x, y) position of food
     direction: str  # Current direction: "up", "down", "left", "right"
     score: int  # Current score
     game_over: bool  # Whether the game has ended

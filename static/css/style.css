@@ -172,6 +172,7 @@ h3 {
   gap: var(--spacing-md);
 }
 
+/* Default canvas styles (Snake) */
 #gameCanvas {
   background-color: var(--bg-secondary);
   border: 3px solid var(--neon-cyan);
@@ -180,7 +181,7 @@ h3 {
     0 0 20px rgba(0, 255, 255, 0.3),
     0 0 40px rgba(0, 255, 255, 0.1),
     inset 0 0 60px rgba(0, 0, 0, 0.5);
-  transition: box-shadow var(--transition-normal);
+  transition: all var(--transition-normal);
 }
 
 #gameCanvas:hover {
@@ -188,6 +189,59 @@ h3 {
     0 0 30px rgba(0, 255, 255, 0.5),
     0 0 60px rgba(0, 255, 255, 0.2),
     inset 0 0 60px rgba(0, 0, 0, 0.5);
+}
+
+/* Snake game canvas */
+#gameCanvas.game-snake {
+  border-color: var(--neon-green);
+  box-shadow:
+    0 0 20px rgba(0, 255, 0, 0.3),
+    0 0 40px rgba(0, 255, 0, 0.1),
+    inset 0 0 60px rgba(0, 0, 0, 0.5);
+}
+
+#gameCanvas.game-snake:hover {
+  box-shadow:
+    0 0 30px rgba(0, 255, 0, 0.5),
+    0 0 60px rgba(0, 255, 0, 0.2),
+    inset 0 0 60px rgba(0, 0, 0, 0.5);
+}
+
+/* Tron game canvas - Dark with neon glow */
+#gameCanvas.game-tron {
+  background-color: #0a0a1a;
+  border-color: var(--neon-cyan);
+  box-shadow:
+    0 0 30px rgba(0, 255, 255, 0.5),
+    0 0 60px rgba(0, 255, 255, 0.2),
+    0 0 100px rgba(0, 255, 255, 0.1),
+    inset 0 0 80px rgba(0, 20, 40, 0.8);
+}
+
+#gameCanvas.game-tron:hover {
+  box-shadow:
+    0 0 40px rgba(0, 255, 255, 0.7),
+    0 0 80px rgba(0, 255, 255, 0.3),
+    0 0 120px rgba(0, 255, 255, 0.15),
+    inset 0 0 80px rgba(0, 20, 40, 0.8);
+}
+
+/* Tank game canvas - Military/camo style */
+#gameCanvas.game-tank {
+  background-color: #2d2d1f;
+  border-color: #4a7c23;
+  border-width: 4px;
+  box-shadow:
+    0 0 15px rgba(74, 124, 35, 0.4),
+    0 0 30px rgba(74, 124, 35, 0.2),
+    inset 0 0 40px rgba(0, 0, 0, 0.6);
+}
+
+#gameCanvas.game-tank:hover {
+  box-shadow:
+    0 0 25px rgba(74, 124, 35, 0.6),
+    0 0 50px rgba(74, 124, 35, 0.3),
+    inset 0 0 40px rgba(0, 0, 0, 0.6);
 }
 
 /* Score Display */
@@ -993,3 +1047,141 @@ input[type="color"]:hover {
 .gap-sm { gap: var(--spacing-sm); }
 .gap-md { gap: var(--spacing-md); }
 .gap-lg { gap: var(--spacing-lg); }
+
+/* ========================================
+   Game-Specific Styles
+   ======================================== */
+
+/* Game Selector Dropdown */
+#gameSelect {
+  font-size: 0.7rem;
+  padding: var(--spacing-md);
+  background: linear-gradient(135deg, var(--bg-secondary), var(--bg-card));
+  border: 2px solid var(--neon-cyan);
+  color: var(--neon-cyan);
+  font-weight: bold;
+}
+
+#gameSelect:focus {
+  border-color: var(--neon-magenta);
+  box-shadow: 0 0 15px rgba(255, 0, 255, 0.4);
+}
+
+#gameSelect option {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  padding: var(--spacing-sm);
+}
+
+/* Tron-specific neon text effect */
+.tron-title {
+  color: var(--neon-cyan);
+  text-shadow:
+    0 0 10px var(--neon-cyan),
+    0 0 20px var(--neon-cyan),
+    0 0 40px var(--neon-cyan),
+    0 0 80px var(--neon-cyan);
+  animation: tronPulse 2s ease-in-out infinite;
+}
+
+@keyframes tronPulse {
+  0%, 100% {
+    text-shadow:
+      0 0 10px var(--neon-cyan),
+      0 0 20px var(--neon-cyan),
+      0 0 40px var(--neon-cyan);
+  }
+  50% {
+    text-shadow:
+      0 0 20px var(--neon-cyan),
+      0 0 40px var(--neon-cyan),
+      0 0 80px var(--neon-cyan),
+      0 0 120px var(--neon-cyan);
+  }
+}
+
+/* Tank game military style elements */
+.tank-panel {
+  background: linear-gradient(135deg, #2d2d1f, #1a1a12);
+  border-color: #4a7c23;
+}
+
+.tank-button {
+  background: linear-gradient(135deg, #4a7c23, #3a6218);
+  border-color: #5a9c2a;
+  color: #ffffff;
+}
+
+.tank-button:hover {
+  background: linear-gradient(135deg, #5a9c2a, #4a7c23);
+  box-shadow: 0 0 15px rgba(74, 124, 35, 0.6);
+}
+
+/* Health bar styling */
+.health-bar-container {
+  background: #333;
+  border: 2px solid #fff;
+  border-radius: var(--radius-sm);
+  padding: 2px;
+  width: 150px;
+}
+
+.health-bar-fill {
+  height: 12px;
+  border-radius: var(--radius-sm);
+  transition: width 0.3s ease, background-color 0.3s ease;
+}
+
+.health-bar-fill.high {
+  background: linear-gradient(90deg, #00ff00, #44ff44);
+}
+
+.health-bar-fill.medium {
+  background: linear-gradient(90deg, #ffff00, #ffaa00);
+}
+
+.health-bar-fill.low {
+  background: linear-gradient(90deg, #ff4400, #ff0000);
+  animation: healthPulse 0.5s ease-in-out infinite;
+}
+
+@keyframes healthPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* Tron player indicators */
+.tron-player-1 {
+  color: #00ffff;
+  text-shadow: 0 0 10px #00ffff;
+}
+
+.tron-player-2 {
+  color: #ff6600;
+  text-shadow: 0 0 10px #ff6600;
+}
+
+/* Game info overlay styles */
+.game-info-overlay {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  background: rgba(0, 0, 0, 0.7);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-md);
+  font-size: 0.5rem;
+  pointer-events: none;
+}
+
+/* Snake color setting group visibility */
+#snakeColorGroup {
+  transition: opacity var(--transition-normal), max-height var(--transition-normal);
+}
+
+#snakeColorGroup[style*="display: none"] {
+  opacity: 0;
+  max-height: 0;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+}

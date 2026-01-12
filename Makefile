@@ -1,7 +1,7 @@
 # SnakeRL Makefile
 # Reinforcement Learning Snake Game
 
-.PHONY: help install dev run clean
+.PHONY: help install dev run clean lint format typecheck ci
 
 # Default target - show help
 help:
@@ -15,6 +15,10 @@ help:
 	@echo "    make dev       Run development server with hot reload"
 	@echo "    make run       Run production server"
 	@echo "    make clean     Remove cache files and build artifacts"
+	@echo "    make lint      Run Ruff linter"
+	@echo "    make format    Run Ruff formatter"
+	@echo "    make typecheck Run MyPy type checker"
+	@echo "    make ci        Run all CI checks (lint + typecheck)"
 	@echo ""
 	@echo "  Usage:"
 	@echo "    1. Run 'make install' to set up the environment"
@@ -58,3 +62,15 @@ clean:
 	find . -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name ".mypy_cache" -exec rm -rf {} + 2>/dev/null || true
 	@echo "Clean complete!"
+
+# Linting and formatting
+lint:
+	ruff check .
+
+format:
+	ruff format .
+
+typecheck:
+	mypy . --ignore-missing-imports
+
+ci: lint typecheck

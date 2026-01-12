@@ -8,3 +8,11 @@ uvicorn[standard]
 
 # WebSocket Support
 websockets
+
+# Machine Learning / RL
+torch>=2.0.0
+gymnasium>=0.29.0
+pyyaml>=6.0
+wandb>=0.16.0
+python-dotenv>=1.0.0
+numpy>=1.24.0,<2
