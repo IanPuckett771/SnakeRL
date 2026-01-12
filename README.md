@@ -22,6 +22,7 @@ A classic Snake game with a web-based frontend, designed for training and visual
 
 ### Installation
 
+**Linux/macOS:**
 ```bash
 # Clone the repository
 git clone https://github.com/IanPuckett771/SnakeRL.git
@@ -33,14 +34,42 @@ make install
 pip install -r requirements.txt
 ```
 
+**Windows (PowerShell):**
+```powershell
+# Clone the repository
+git clone https://github.com/IanPuckett771/SnakeRL.git
+cd SnakeRL
+
+# Install dependencies (choose one method)
+.\Makefile.ps1 install
+# or use the standalone script:
+.\install.ps1
+# or manually:
+python -m venv venv
+.\venv\Scripts\pip install -r requirements.txt
+```
+
 ### Running the Game
 
+**Linux/macOS:**
 ```bash
 # Development mode (with auto-reload)
 make dev
 
 # Production mode
 make run
+```
+
+**Windows (PowerShell):**
+```powershell
+# Activate virtual environment first
+.\venv\Scripts\Activate.ps1
+
+# Development mode (with auto-reload)
+.\Makefile.ps1 dev
+
+# Production mode
+.\Makefile.ps1 run
 ```
 
 Then open http://localhost:8000 in your browser.
@@ -116,11 +145,20 @@ SnakeRL/
 
 ## Makefile Commands
 
+**Linux/macOS:**
 ```bash
 make install  # Create venv and install dependencies
 make dev      # Run with auto-reload (development)
 make run      # Run production server
 make clean    # Remove cache files
+```
+
+**Windows (PowerShell):**
+```powershell
+.\Makefile.ps1 install  # Create venv and install dependencies
+.\Makefile.ps1 dev      # Run with auto-reload (development)
+.\Makefile.ps1 run      # Run production server
+.\Makefile.ps1 clean    # Remove cache files
 ```
 
 ## Contributing
