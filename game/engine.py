@@ -31,20 +31,15 @@ class SnakeGame:
         ("blue", 20, 1),    # Ultra rare - blue, 20 points
     ]
 
-    def __init__(self, width: int = 20, height: int = 20, 
-                 steps_without_treat_limit: int = 100, treat_penalty: float = 0.1):
+    def __init__(self, width: int = 20, height: int = 20):
         """Initialize the game with configurable board size.
 
         Args:
             width: Board width in cells
             height: Board height in cells
-            steps_without_treat_limit: Maximum steps without eating a treat before penalty starts
-            treat_penalty: Penalty per step after limit (applied to reward, can reduce score)
         """
         self.width = width
         self.height = height
-        self.steps_without_treat_limit = steps_without_treat_limit
-        self.treat_penalty = treat_penalty
         self.snake: list[Tuple[int, int]] = []
         self.food: Tuple[int, int] = (0, 0)
         self.food_type: str = "red"  # Color/type of current food
@@ -181,7 +176,7 @@ class SnakeGame:
 
         Returns:
             Tuple of (GameState, reward, done)
-            - reward: +10 for eating food, -10 for death, 0 otherwise
+            - reward: Based on speed of treat collection (faster = higher reward)
             - done: True if game is over
         """
         if self.game_over:
@@ -201,55 +196,54 @@ class SnakeGame:
         # Check for collision
         if self._check_collision(new_head):
             self.game_over = True
-            return self.get_state(), -10.0, True
+            # Death penalty scales with snake length (longer snake = more to lose)
+            death_penalty = -10.0 - len(self.snake)
+            return self.get_state(), death_penalty, True
 
         # Move snake
         self.snake.insert(0, new_head)
+        self.steps_since_last_treat += 1
 
-        # Calculate distance-based rewards (reward shaping to guide learning)
+        # Calculate distance change for direction incentive
         old_head = self.snake[1] if len(self.snake) > 1 else self.snake[0]
         old_distance = abs(old_head[0] - self.food[0]) + abs(old_head[1] - self.food[1])
         new_distance = abs(new_head[0] - self.food[0]) + abs(new_head[1] - self.food[1])
-        
-        # Reward shaping: small reward for getting closer to food
-        distance_reward = 0.0
-        if new_distance < old_distance:
-            # Getting closer to food - positive reward
-            distance_reward = 0.1 * (old_distance - new_distance) / max(self.width, self.height)
-        elif new_distance > old_distance:
-            # Moving away from food - small negative reward
-            distance_reward = -0.05 * (new_distance - old_distance) / max(self.width, self.height)
 
-        # Check if food eaten
-        reward = distance_reward  # Start with distance reward
+        # SIMPLE REWARD: Treat collection speed is primary, direction is secondary
+        reward = 0.0
+        
+        # Small direction incentive (not too strong to allow wall navigation)
+        if new_distance < old_distance:
+            reward += 0.1  # Moving closer to treat
+        elif new_distance > old_distance:
+            reward -= 0.2  # Moving away from treat (penalize more than reward)
+        
         if new_head == self.food:
-            # Add points based on treat type
+            # TREAT COLLECTED! Reward based on speed
+            # Faster collection = higher reward
+            # Formula: base_reward * (max_steps - steps_taken) / max_steps
+            # This gives higher reward for fewer steps
+            max_reasonable_steps = self.width + self.height  # Manhattan distance upper bound
+            speed_multiplier = max(0.1, (max_reasonable_steps - self.steps_since_last_treat) / max_reasonable_steps)
+            
+            # Base reward scaled by treat value and speed
+            base_reward = float(self.food_points * 10)
+            reward = base_reward * (1.0 + speed_multiplier)  # 1.0 to 2.0x multiplier based on speed
+            
+            # Add points to score
             self.score += self.food_points
-            # Large reward for eating food (scaled by treat value)
-            reward += float(self.food_points * 10)  # Scale reward for RL
-            # Bonus for eating quickly
-            if self.steps_since_last_treat < 50:
-                reward += 2.0  # Quick treat bonus
-            self.steps_since_last_treat = 0  # Reset counter
+            
+            # Reset counter and spawn new food/walls
+            self.steps_since_last_treat = 0
             self._spawn_food()
-            # Spawn new walls in different spots after eating treat
             self._spawn_walls()
         else:
             # Remove tail if no food eaten
             self.snake.pop()
-            # Increment steps without treat
-            self.steps_since_last_treat += 1
             
-            # NO survival bonus - we want the agent to focus on treats, not just staying alive
-            
-            # Apply penalty if too long without eating a treat (encourages active treat seeking)
-            if self.steps_since_last_treat > self.steps_without_treat_limit:
-                penalty = -self.treat_penalty * (self.steps_since_last_treat - self.steps_without_treat_limit)
-                reward += penalty
-                # Also reduce score if penalty is significant
-                if penalty < -1.0:
-                    score_reduction = int(abs(penalty) / 10)  # Convert reward penalty to score reduction
-                    self.score = max(0, self.score - score_reduction)  # Don't let score go below 0
+            # Small time pressure: slight negative reward per step to encourage speed
+            # But not so much that it discourages survival
+            reward = -0.01
 
         return self.get_state(), reward, False
 

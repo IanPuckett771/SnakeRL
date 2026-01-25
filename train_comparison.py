@@ -65,6 +65,7 @@ def train_algorithm(agent, algorithm_name, duration_seconds=60, use_wandb=True,
         scores = []
         episode_rewards = []
         episode_lengths = []
+        snake_lengths = []  # Track snake length for each episode
         losses = []
         
         # Setup for intermediate checkpoints (10 stages)
@@ -130,9 +131,13 @@ def train_algorithm(agent, algorithm_name, duration_seconds=60, use_wandb=True,
                 if loss > 0:
                     episode_loss.append(loss)
             
+            # Track snake length at end of episode
+            snake_length = len(game.snake)
+            
             scores.append(game.score)
             episode_rewards.append(total_reward)
             episode_lengths.append(steps)
+            snake_lengths.append(snake_length)
             if episode_loss:
                 losses.append(np.mean(episode_loss))
             
@@ -141,6 +146,7 @@ def train_algorithm(agent, algorithm_name, duration_seconds=60, use_wandb=True,
                 avg_score = np.mean(scores[-10:]) if scores else 0
                 avg_reward = np.mean(episode_rewards[-10:]) if episode_rewards else 0
                 avg_length = np.mean(episode_lengths[-10:]) if episode_lengths else 0
+                avg_snake_length = np.mean(snake_lengths[-10:]) if snake_lengths else 0
                 avg_loss = np.mean(losses[-10:]) if losses else 0
                 elapsed = time.time() - start_time
                 remaining = duration_seconds - elapsed
@@ -179,6 +185,9 @@ def train_algorithm(agent, algorithm_name, duration_seconds=60, use_wandb=True,
                         "avg_reward_10": avg_reward,
                         "episode_length": steps,
                         "avg_length_10": avg_length,
+                        "snake_length": snake_length,
+                        "avg_snake_length_10": avg_snake_length,
+                        "avg_snake_length_all": np.mean(snake_lengths) if snake_lengths else 0,
                         "time_elapsed": elapsed,
                         "time_remaining": remaining,
                         "stage": stage,
