@@ -8,3 +8,10 @@ uvicorn[standard]
 
 # WebSocket Support
 websockets
+
+# Deep Learning
+torch
+numpy
+
+# Experiment Tracking
+wandb

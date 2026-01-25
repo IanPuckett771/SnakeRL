@@ -45,6 +45,59 @@ async def get_checkpoints():
     return {"checkpoints": checkpoints}
 
 
+@app.get("/checkpoint-info/{checkpoint_name}")
+async def get_checkpoint_info(checkpoint_name: str):
+    """Return metadata for a specific checkpoint."""
+    checkpoint_path = CHECKPOINTS_DIR / checkpoint_name
+    
+    if not checkpoint_path.exists():
+        return {"error": "Checkpoint not found"}, 404
+    
+    try:
+        import torch
+        checkpoint = torch.load(str(checkpoint_path), map_location="cpu")
+        
+        # Extract metadata if available
+        metadata = {}
+        if isinstance(checkpoint, dict):
+            if "episodes" in checkpoint:
+                metadata["episodes"] = checkpoint["episodes"]
+            if "avg_score" in checkpoint:
+                metadata["avg_score"] = float(checkpoint["avg_score"])
+            if "epsilon" in checkpoint:
+                metadata["epsilon"] = float(checkpoint["epsilon"])
+        
+        return metadata
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+
+@app.get("/training-status")
+async def get_training_status():
+    """Check if training is currently running by looking for training lock file."""
+    import time
+    import json
+    
+    training_lock_file = BASE_DIR / ".training_lock"
+    
+    if training_lock_file.exists():
+        try:
+            with open(training_lock_file, 'r') as f:
+                data = json.load(f)
+            return {
+                "training": True,
+                "start_time": data.get("start_time", 0),
+                "duration": data.get("duration", 60),
+                "elapsed": time.time() - data.get("start_time", time.time()),
+                "episodes": data.get("episodes", 0),
+                "avg_score": data.get("avg_score", 0),
+            }
+        except:
+            pass
+    
+    return {"training": False}
+
+
 @app.get("/leaderboard")
 async def get_leaderboard():
     """Read leaderboard.txt (CSV format) and return JSON array sorted by score descending."""
@@ -241,7 +294,7 @@ async def run_agent_loop(
     game: SnakeGame,
     agent: AgentInterface,
     snake_color: str,
-    delay: float = 0.1,
+    delay: float = 0.2,  # Increased from 0.1 to 0.2 for better viewing
 ):
     """Run the agent loop, sending state updates with delay.
 

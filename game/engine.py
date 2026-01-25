@@ -21,19 +21,38 @@ class SnakeGame:
         "right": "left",
     }
 
-    def __init__(self, width: int = 20, height: int = 20):
+    # Treat types: (color, points, spawn_weight)
+    # Lower weight = less likely to spawn
+    TREAT_TYPES = [
+        ("red", 1, 50),      # Common - red, 1 point
+        ("orange", 2, 30),   # Uncommon - orange, 2 points
+        ("yellow", 5, 15),   # Rare - yellow, 5 points
+        ("green", 10, 4),    # Very rare - green, 10 points
+        ("blue", 20, 1),    # Ultra rare - blue, 20 points
+    ]
+
+    def __init__(self, width: int = 20, height: int = 20, 
+                 steps_without_treat_limit: int = 100, treat_penalty: float = 0.1):
         """Initialize the game with configurable board size.
 
         Args:
             width: Board width in cells
             height: Board height in cells
+            steps_without_treat_limit: Maximum steps without eating a treat before penalty starts
+            treat_penalty: Penalty per step after limit (applied to reward, can reduce score)
         """
         self.width = width
         self.height = height
+        self.steps_without_treat_limit = steps_without_treat_limit
+        self.treat_penalty = treat_penalty
         self.snake: list[Tuple[int, int]] = []
         self.food: Tuple[int, int] = (0, 0)
+        self.food_type: str = "red"  # Color/type of current food
+        self.food_points: int = 1    # Points this food is worth
+        self.walls: list[Tuple[int, int]] = []  # List of wall positions
         self.direction: str = "right"
         self.score: int = 0
+        self.steps_since_last_treat: int = 0  # Track steps without eating a treat
         self.game_over: bool = False
         self.reset()
 
@@ -58,28 +77,74 @@ class SnakeGame:
         self.direction = "right"
         self.score = 0
         self.game_over = False
+        self.walls = []
+        self.steps_since_last_treat = 0
 
         # Place food in random empty cell
         self._spawn_food()
+        
+        # Start spawning walls
+        self._spawn_walls()
 
         return self.get_state()
 
     def _spawn_food(self) -> None:
-        """Spawn food in a random empty cell."""
-        # Get all empty cells
+        """Spawn food in a random empty cell with weighted random type selection."""
+        # Get all empty cells (excluding snake and walls)
         snake_set = set(self.snake)
+        wall_set = set(self.walls)
         empty_cells = [
             (x, y)
             for x in range(self.width)
             for y in range(self.height)
-            if (x, y) not in snake_set
+            if (x, y) not in snake_set and (x, y) not in wall_set
         ]
 
         if empty_cells:
+            # Select treat type based on weighted probability
+            weights = [treat[2] for treat in self.TREAT_TYPES]
+            treat_type = random.choices(self.TREAT_TYPES, weights=weights, k=1)[0]
+            
             self.food = random.choice(empty_cells)
+            self.food_type = treat_type[0]  # color
+            self.food_points = treat_type[1]  # points
         else:
             # No empty cells (snake fills board - win condition)
             self.food = (-1, -1)
+            self.food_type = "red"
+            self.food_points = 1
+
+    def _spawn_walls(self) -> None:
+        """Spawn random walls until the player eats a treat.
+        Walls are placed in empty cells, avoiding snake and food."""
+        # Clear existing walls
+        self.walls = []
+        
+        # Get all occupied cells (snake + food)
+        occupied = set(self.snake)
+        if self.food[0] >= 0 and self.food[1] >= 0:
+            occupied.add(self.food)
+        
+        # Get all empty cells
+        empty_cells = [
+            (x, y)
+            for x in range(self.width)
+            for y in range(self.height)
+            if (x, y) not in occupied
+        ]
+        
+        if not empty_cells:
+            return
+        
+        # Spawn 3-6 walls randomly (adjust based on board size)
+        num_walls = random.randint(
+            min(3, len(empty_cells) // 4),
+            min(6, len(empty_cells) // 3)
+        )
+        
+        # Randomly select wall positions
+        wall_positions = random.sample(empty_cells, min(num_walls, len(empty_cells)))
+        self.walls = wall_positions
 
     def _check_collision(self, position: Tuple[int, int]) -> bool:
         """Check if position collides with walls or snake body.
@@ -92,8 +157,12 @@ class SnakeGame:
         """
         x, y = position
 
-        # Wall collision
+        # Boundary wall collision
         if x < 0 or x >= self.width or y < 0 or y >= self.height:
+            return True
+
+        # Game wall collision
+        if position in self.walls:
             return True
 
         # Self collision (check against body, not including tail since it will move)
@@ -137,15 +206,50 @@ class SnakeGame:
         # Move snake
         self.snake.insert(0, new_head)
 
+        # Calculate distance-based rewards (reward shaping to guide learning)
+        old_head = self.snake[1] if len(self.snake) > 1 else self.snake[0]
+        old_distance = abs(old_head[0] - self.food[0]) + abs(old_head[1] - self.food[1])
+        new_distance = abs(new_head[0] - self.food[0]) + abs(new_head[1] - self.food[1])
+        
+        # Reward shaping: small reward for getting closer to food
+        distance_reward = 0.0
+        if new_distance < old_distance:
+            # Getting closer to food - positive reward
+            distance_reward = 0.1 * (old_distance - new_distance) / max(self.width, self.height)
+        elif new_distance > old_distance:
+            # Moving away from food - small negative reward
+            distance_reward = -0.05 * (new_distance - old_distance) / max(self.width, self.height)
+
         # Check if food eaten
-        reward = 0.0
+        reward = distance_reward  # Start with distance reward
         if new_head == self.food:
-            self.score += 1
-            reward = 10.0
+            # Add points based on treat type
+            self.score += self.food_points
+            # Large reward for eating food (scaled by treat value)
+            reward += float(self.food_points * 10)  # Scale reward for RL
+            # Bonus for eating quickly
+            if self.steps_since_last_treat < 50:
+                reward += 2.0  # Quick treat bonus
+            self.steps_since_last_treat = 0  # Reset counter
             self._spawn_food()
+            # Spawn new walls in different spots after eating treat
+            self._spawn_walls()
         else:
             # Remove tail if no food eaten
             self.snake.pop()
+            # Increment steps without treat
+            self.steps_since_last_treat += 1
+            
+            # NO survival bonus - we want the agent to focus on treats, not just staying alive
+            
+            # Apply penalty if too long without eating a treat (encourages active treat seeking)
+            if self.steps_since_last_treat > self.steps_without_treat_limit:
+                penalty = -self.treat_penalty * (self.steps_since_last_treat - self.steps_without_treat_limit)
+                reward += penalty
+                # Also reduce score if penalty is significant
+                if penalty < -1.0:
+                    score_reduction = int(abs(penalty) / 10)  # Convert reward penalty to score reduction
+                    self.score = max(0, self.score - score_reduction)  # Don't let score go below 0
 
         return self.get_state(), reward, False
 
@@ -158,6 +262,9 @@ class SnakeGame:
         return GameState(
             snake=list(self.snake),
             food=self.food,
+            food_type=self.food_type,
+            food_points=self.food_points,
+            walls=list(self.walls),
             direction=self.direction,
             score=self.score,
             game_over=self.game_over,

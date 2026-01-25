@@ -25,6 +25,20 @@ class GameController {
         this.leaderboardList = document.getElementById('leaderboardList');
         this.checkpointGroup = document.getElementById('checkpointGroup');
         this.checkpointSelect = document.getElementById('checkpoint');
+        this.checkpointInfo = document.getElementById('checkpointInfo');
+        this.checkpointName = document.getElementById('checkpointName');
+        this.checkpointMeta = document.getElementById('checkpointMeta');
+        this.trainingProgress = document.getElementById('trainingProgress');
+        this.progressBar = document.getElementById('progressBar');
+        this.trainingStats = document.getElementById('trainingStats');
+        
+        // Track last checkpoint used for "Play Again"
+        this.lastCheckpoint = null;
+        this.lastMode = 'play';
+        
+        // Check for training progress periodically
+        this.trainingCheckInterval = null;
+        this.checkpointRefreshInterval = null;
 
         // Settings inputs
         this.boardWidthInput = document.getElementById('boardWidth');
@@ -52,6 +66,68 @@ class GameController {
         this.setupWebSocket();
         this.fetchLeaderboard();
         this.drawEmptyGrid();
+        this.startTrainingProgressCheck();
+        this.startCheckpointRefresh();
+    }
+    
+    /**
+     * Start checking for training progress
+     */
+    startTrainingProgressCheck() {
+        // Check every 2 seconds if training is happening
+        this.trainingCheckInterval = setInterval(() => {
+            this.checkTrainingProgress();
+        }, 2000);
+    }
+    
+    /**
+     * Start auto-refreshing checkpoints when in agent mode
+     */
+    startCheckpointRefresh() {
+        // Refresh checkpoints every 5 seconds if in agent mode
+        this.checkpointRefreshInterval = setInterval(() => {
+            if (this.currentMode === 'agent') {
+                this.fetchCheckpoints();
+            }
+        }, 5000); // Check every 5 seconds
+    }
+    
+    /**
+     * Check if training is in progress by looking for checkpoint file updates
+     */
+    async checkTrainingProgress() {
+        try {
+            const response = await fetch('/training-status');
+            if (response.ok) {
+                const data = await response.json();
+                if (data.training) {
+                    this.trainingProgress.classList.add('visible');
+                    const progress = Math.min(100, (data.elapsed / data.duration) * 100);
+                    this.progressBar.style.width = `${progress}%`;
+                    this.progressBar.textContent = `${Math.round(progress)}%`;
+                    
+                    let statsText = '';
+                    if (data.episodes) {
+                        statsText += `Episodes: ${data.episodes}`;
+                    }
+                    if (data.avg_score !== undefined) {
+                        if (statsText) statsText += ' • ';
+                        statsText += `Avg Score: ${data.avg_score.toFixed(1)}`;
+                    }
+                    if (statsText) {
+                        this.trainingStats.textContent = statsText;
+                    }
+                } else {
+                    this.trainingProgress.classList.remove('visible');
+                    // Refresh checkpoints if training just finished
+                    if (this.currentMode === 'agent') {
+                        this.fetchCheckpoints();
+                    }
+                }
+            }
+        } catch (error) {
+            // Silently fail - training status is optional
+        }
     }
 
     /**
@@ -185,6 +261,9 @@ class GameController {
      * @param {string} mode - 'play' or 'agent'
      */
     setMode(mode) {
+        // Preserve checkpoint selection when switching modes
+        const currentCheckpoint = this.checkpointSelect.value;
+        
         this.currentMode = mode;
 
         // Update button states
@@ -194,7 +273,7 @@ class GameController {
         // Show/hide checkpoint dropdown
         this.checkpointGroup.classList.toggle('visible', mode === 'agent');
 
-        // Fetch checkpoints if switching to agent mode
+        // Fetch checkpoints if switching to agent mode (will preserve selection)
         if (mode === 'agent') {
             this.fetchCheckpoints();
         }
@@ -208,13 +287,23 @@ class GameController {
      */
     async fetchCheckpoints() {
         try {
+            // Preserve current selection before repopulating
+            const currentSelection = this.checkpointSelect.value;
+            
             const response = await fetch('/checkpoints');
             if (!response.ok) {
                 throw new Error('Failed to fetch checkpoints');
             }
 
-            const checkpoints = await response.json();
+            const data = await response.json();
+            // Backend returns {checkpoints: [...]}, so extract the array
+            const checkpoints = data.checkpoints || data;
             this.populateCheckpointDropdown(checkpoints);
+            
+            // Restore selection if it still exists
+            if (currentSelection && this.checkpointSelect.querySelector(`option[value="${currentSelection}"]`)) {
+                this.checkpointSelect.value = currentSelection;
+            }
         } catch (error) {
             console.error('Error fetching checkpoints:', error);
             this.checkpointSelect.innerHTML = '<option value="">No checkpoints available</option>';
@@ -226,18 +315,133 @@ class GameController {
      * @param {Array} checkpoints - Array of checkpoint objects
      */
     populateCheckpointDropdown(checkpoints) {
-        this.checkpointSelect.innerHTML = '<option value="">Select a checkpoint...</option>';
+        this.checkpointSelect.innerHTML = '<option value="">Default Agent (Heuristic)</option>';
 
         if (Array.isArray(checkpoints) && checkpoints.length > 0) {
+            // Group checkpoints by algorithm and run, then sort stages
+            const grouped = {};
+            const timestamps = [];
+            
+            // First pass: collect all checkpoints and timestamps
             checkpoints.forEach(checkpoint => {
-                const option = document.createElement('option');
-                option.value = checkpoint.path || checkpoint.name || checkpoint;
-                option.textContent = checkpoint.name || checkpoint.path || checkpoint;
-                this.checkpointSelect.appendChild(option);
+                const checkpointValue = typeof checkpoint === 'string' 
+                    ? checkpoint 
+                    : (checkpoint.path || checkpoint.name || checkpoint);
+                
+                // Extract algorithm name, timestamp, and stage
+                // Pattern: algo_agent_20250125_123456_stage01.pt or algo_agent_stage01.pt (old format)
+                const timestampMatch = checkpointValue.match(/^(.+?)_agent_(\d{8}_\d{6})(_stage(\d+))?\.pt$/);
+                const oldMatch = checkpointValue.match(/^(.+?)_agent(_stage(\d+))?\.pt$/);
+                
+                if (timestampMatch) {
+                    // New format with timestamp
+                    const algoName = timestampMatch[1];
+                    const timestamp = timestampMatch[2];
+                    const stageNum = timestampMatch[4] ? parseInt(timestampMatch[4]) : 999;
+                    
+                    // Collect timestamp for finding newest
+                    if (!timestamps.includes(timestamp)) {
+                        timestamps.push(timestamp);
+                    }
+                    
+                    const key = `${algoName}_${timestamp}`;
+                    if (!grouped[key]) {
+                        grouped[key] = { algoName, timestamp, items: [] };
+                    }
+                    grouped[key].items.push({ value: checkpointValue, stage: stageNum });
+                } else if (oldMatch) {
+                    // Old format without timestamp
+                    const algoName = oldMatch[1];
+                    const stageNum = oldMatch[3] ? parseInt(oldMatch[3]) : 999;
+                    
+                    const key = `${algoName}_old`;
+                    if (!grouped[key]) {
+                        grouped[key] = { algoName, timestamp: 'old', items: [] };
+                    }
+                    grouped[key].items.push({ value: checkpointValue, stage: stageNum });
+                } else {
+                    // Handle non-standard checkpoint names
+                    if (!grouped['other_old']) {
+                        grouped['other_old'] = { algoName: 'other', timestamp: 'old', items: [] };
+                    }
+                    grouped['other_old'].items.push({ value: checkpointValue, stage: 999 });
+                }
             });
-        } else {
-            this.checkpointSelect.innerHTML = '<option value="">No checkpoints available</option>';
+            
+            // Find the most recent timestamp (newest training run)
+            const newestTimestamp = timestamps.length > 0 
+                ? timestamps.sort().reverse()[0]  // Sort descending, take first
+                : null;
+            
+            // Sort by timestamp (newest first) and algorithm name, then by stage
+            Object.keys(grouped).sort((a, b) => {
+                const groupA = grouped[a];
+                const groupB = grouped[b];
+                // Sort by timestamp (newer first), then by algorithm name
+                if (groupA.timestamp !== groupB.timestamp) {
+                    if (groupA.timestamp === 'old') return 1;
+                    if (groupB.timestamp === 'old') return -1;
+                    return groupB.timestamp.localeCompare(groupA.timestamp); // Newest first
+                }
+                return groupA.algoName.localeCompare(groupB.algoName);
+            }).forEach(key => {
+                const group = grouped[key];
+                const items = group.items;
+                items.sort((a, b) => a.stage - b.stage);
+                
+                // Determine if this is the newest training run
+                const isNewest = group.timestamp !== 'old' && group.timestamp === newestTimestamp;
+                
+                // Format timestamp for display
+                let runLabel = '';
+                if (isNewest) {
+                    // Parse timestamp: 20250125_123456 -> Jan 25, 12:34:56
+                    const ts = group.timestamp;
+                    const date = ts.substring(0, 8);
+                    const time = ts.substring(9);
+                    const month = date.substring(4, 6);
+                    const day = date.substring(6, 8);
+                    const hour = time.substring(0, 2);
+                    const min = time.substring(2, 4);
+                    runLabel = ` [NEW - ${month}/${day} ${hour}:${min}]`;
+                } else if (group.timestamp !== 'old') {
+                    // Show timestamp for older runs
+                    const ts = group.timestamp;
+                    const date = ts.substring(0, 8);
+                    const time = ts.substring(9);
+                    const month = date.substring(4, 6);
+                    const day = date.substring(6, 8);
+                    const hour = time.substring(0, 2);
+                    const min = time.substring(2, 4);
+                    runLabel = ` (${month}/${day} ${hour}:${min})`;
+                } else {
+                    runLabel = ' (Previous)';
+                }
+                
+                items.forEach(item => {
+                    const checkpointValue = item.value;
+                    let checkpointLabel = '';
+                    
+                    // Format label nicely
+                    if (item.stage < 999) {
+                        checkpointLabel = `${group.algoName.toUpperCase()} - Stage ${item.stage}/10${runLabel}`;
+                    } else {
+                        checkpointLabel = `${group.algoName.toUpperCase()} (final)${runLabel}`;
+                    }
+                    
+                    const option = document.createElement('option');
+                    option.value = checkpointValue;
+                    option.textContent = checkpointLabel;
+                    // Highlight newest checkpoints only
+                    if (isNewest) {
+                        option.style.fontWeight = 'bold';
+                        option.style.color = '#00ff00';
+                    }
+                    this.checkpointSelect.appendChild(option);
+                });
+            });
         }
+        // If no checkpoints, default option is already set above
     }
 
     /**
@@ -279,14 +483,18 @@ class GameController {
             speed: speed
         };
 
-        // Add checkpoint if in agent mode
+        // Add checkpoint if in agent mode (optional - can use default agent)
         if (this.currentMode === 'agent') {
             const checkpoint = this.checkpointSelect.value;
-            if (!checkpoint) {
-                alert('Please select a checkpoint for the agent');
-                return;
+            if (checkpoint) {
+                config.checkpoint = checkpoint;
+                this.lastCheckpoint = checkpoint;
+            } else {
+                this.lastCheckpoint = null;
             }
-            config.checkpoint = checkpoint;
+            this.lastMode = 'agent';
+        } else {
+            this.lastMode = 'play';
         }
 
         // Hide game over overlay if visible
@@ -298,6 +506,60 @@ class GameController {
         // Reset score display
         this.currentScore = 0;
         this.updateScoreDisplay(0);
+        
+        // Update checkpoint display
+        this.updateCheckpointDisplay(config.checkpoint);
+    }
+    
+    /**
+     * Update checkpoint information display
+     * @param {string} checkpoint - Checkpoint name or null
+     */
+    updateCheckpointDisplay(checkpoint) {
+        if (this.currentMode === 'agent') {
+            this.checkpointInfo.style.display = 'block';
+            if (checkpoint) {
+                this.checkpointName.textContent = checkpoint;
+                // Fetch checkpoint metadata if available
+                this.fetchCheckpointMetadata(checkpoint);
+            } else {
+                this.checkpointName.textContent = 'Default Agent (Heuristic)';
+                this.checkpointMeta.textContent = 'Using rule-based strategy';
+            }
+        } else {
+            this.checkpointInfo.style.display = 'none';
+        }
+    }
+    
+    /**
+     * Fetch checkpoint metadata from server
+     * @param {string} checkpoint - Checkpoint filename
+     */
+    async fetchCheckpointMetadata(checkpoint) {
+        try {
+            const response = await fetch(`/checkpoint-info/${encodeURIComponent(checkpoint)}`);
+            if (response.ok) {
+                const data = await response.json();
+                let metaText = '';
+                if (data.episodes) {
+                    metaText += `Trained for ${data.episodes} episodes`;
+                }
+                if (data.avg_score !== undefined) {
+                    if (metaText) metaText += ' • ';
+                    metaText += `Avg Score: ${data.avg_score.toFixed(1)}`;
+                }
+                if (data.epsilon !== undefined) {
+                    if (metaText) metaText += ' • ';
+                    metaText += `Epsilon: ${data.epsilon.toFixed(3)}`;
+                }
+                this.checkpointMeta.textContent = metaText || 'Trained agent';
+            } else {
+                this.checkpointMeta.textContent = 'Trained agent';
+            }
+        } catch (error) {
+            console.error('Error fetching checkpoint metadata:', error);
+            this.checkpointMeta.textContent = 'Trained agent';
+        }
     }
 
     /**
@@ -323,7 +585,7 @@ class GameController {
     renderState(state) {
         if (!state) return;
 
-        const { width, height, snake, food, score } = state;
+        const { width, height, snake, food, food_type, walls, score } = state;
 
         // Clear canvas
         this.ctx.fillStyle = '#000';
@@ -332,9 +594,14 @@ class GameController {
         // Draw grid lines
         this.drawGrid(width, height);
 
+        // Draw walls
+        if (walls && walls.length > 0) {
+            this.drawWalls(walls);
+        }
+
         // Draw food
         if (food) {
-            this.drawFood(food);
+            this.drawFood(food, food_type);
         }
 
         // Draw snake
@@ -498,18 +765,55 @@ class GameController {
     }
 
     /**
-     * Draw the food
+     * Draw the food with color based on type
      * @param {Object} food - Food position {x, y}
+     * @param {string} foodType - Food type/color: "red", "orange", "yellow", "green", "blue"
      */
-    drawFood(food) {
+    drawFood(food, foodType = 'red') {
         const x = food.x * this.cellSize;
         const y = food.y * this.cellSize;
         const centerX = x + this.cellSize / 2;
         const centerY = y + this.cellSize / 2;
         const radius = (this.cellSize - 4) / 2;
 
+        // Color mapping for different treat types
+        const colorMap = {
+            'red': {
+                shadow: '#ff0000',
+                light: '#ff6666',
+                mid: '#ff0000',
+                dark: '#cc0000'
+            },
+            'orange': {
+                shadow: '#ff8800',
+                light: '#ffaa44',
+                mid: '#ff8800',
+                dark: '#cc6600'
+            },
+            'yellow': {
+                shadow: '#ffdd00',
+                light: '#ffee66',
+                mid: '#ffdd00',
+                dark: '#ccaa00'
+            },
+            'green': {
+                shadow: '#00ff00',
+                light: '#66ff66',
+                mid: '#00ff00',
+                dark: '#00cc00'
+            },
+            'blue': {
+                shadow: '#0088ff',
+                light: '#44aaff',
+                mid: '#0088ff',
+                dark: '#0066cc'
+            }
+        };
+
+        const colors = colorMap[foodType] || colorMap['red'];
+
         // Draw glowing food
-        this.ctx.shadowColor = '#ff0000';
+        this.ctx.shadowColor = colors.shadow;
         this.ctx.shadowBlur = 15;
 
         // Gradient for 3D effect
@@ -521,9 +825,9 @@ class GameController {
             centerY,
             radius
         );
-        gradient.addColorStop(0, '#ff6666');
-        gradient.addColorStop(0.5, '#ff0000');
-        gradient.addColorStop(1, '#cc0000');
+        gradient.addColorStop(0, colors.light);
+        gradient.addColorStop(0.5, colors.mid);
+        gradient.addColorStop(1, colors.dark);
 
         this.ctx.fillStyle = gradient;
         this.ctx.beginPath();
@@ -532,6 +836,36 @@ class GameController {
 
         // Reset shadow
         this.ctx.shadowBlur = 0;
+    }
+
+    /**
+     * Draw walls
+     * @param {Array} walls - Array of {x, y} wall positions
+     */
+    drawWalls(walls) {
+        walls.forEach(wall => {
+            const x = wall.x * this.cellSize;
+            const y = wall.y * this.cellSize;
+
+            // Draw wall with dark gray color
+            this.ctx.fillStyle = '#333333';
+            this.ctx.strokeStyle = '#555555';
+            this.ctx.lineWidth = 2;
+
+            // Draw filled rectangle with border
+            this.ctx.fillRect(x + 1, y + 1, this.cellSize - 2, this.cellSize - 2);
+            this.ctx.strokeRect(x + 1, y + 1, this.cellSize - 2, this.cellSize - 2);
+
+            // Add some texture with darker lines
+            this.ctx.strokeStyle = '#222222';
+            this.ctx.lineWidth = 1;
+            this.ctx.beginPath();
+            this.ctx.moveTo(x + 2, y + 2);
+            this.ctx.lineTo(x + this.cellSize - 2, y + this.cellSize - 2);
+            this.ctx.moveTo(x + this.cellSize - 2, y + 2);
+            this.ctx.lineTo(x + 2, y + this.cellSize - 2);
+            this.ctx.stroke();
+        });
     }
 
     /**
@@ -647,6 +981,15 @@ class GameController {
     playAgain() {
         this.gameOverOverlay.classList.remove('visible');
         this.playerNameInput.value = '';
+        
+        // Restore previous mode and checkpoint if it was agent mode
+        if (this.lastMode === 'agent') {
+            this.setMode('agent');
+            if (this.lastCheckpoint) {
+                this.checkpointSelect.value = this.lastCheckpoint;
+            }
+        }
+        
         this.startGame();
     }
 
