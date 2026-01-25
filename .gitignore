@@ -206,7 +206,17 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-# Training artifacts
-wandb/
-logs/
+# SnakeRL project-specific
+# Trained model checkpoints (large binary files)
 checkpoints/
+*.pt
+*.pth
+
+# Weights & Biases run data
+wandb/
+
+# Training status lock file
+.training_lock
+
+# Leaderboard data (user-specific)
+leaderboard.txt

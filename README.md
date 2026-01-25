@@ -133,6 +133,77 @@ SnakeRL/
 - **Growth**: Snake grows by 1 segment per food eaten
 - **Direction**: Cannot reverse direction (no 180° turns)
 
+## Training an RL Agent
+
+Train a DQN (Deep Q-Network) agent to play Snake using the provided training script.
+
+### Prerequisites
+
+1. Install dependencies (includes PyTorch and Weights & Biases):
+   ```powershell
+   # Windows
+   .\venv\Scripts\pip install -r requirements.txt
+   
+   # Linux/macOS
+   pip install -r requirements.txt
+   ```
+
+2. Set up Weights & Biases (optional but recommended):
+   ```powershell
+   # Windows (activate venv first)
+   .\venv\Scripts\Activate.ps1
+   python -m wandb login
+   
+   # Linux/macOS
+   wandb login
+   ```
+   You'll need an API key from https://wandb.ai/authorize
+   Or run with `--no-wandb` to disable logging.
+
+### Basic Training
+
+```bash
+# Train for 1000 episodes with default settings
+python train.py
+
+# Train with custom parameters
+python train.py --episodes 2000 --board-size 20 --lr 0.001
+
+# Train without W&B logging
+python train.py --no-wandb
+```
+
+### Training Options
+
+```bash
+python train.py \
+    --episodes 1000 \          # Number of training episodes
+    --board-size 20 \          # Board size (20x20)
+    --lr 0.001 \               # Learning rate
+    --gamma 0.99 \             # Discount factor
+    --batch-size 64 \          # Training batch size
+    --save-interval 100 \      # Save checkpoint every N episodes
+    --project snakerl \        # W&B project name
+    --name my-run \            # W&B run name
+    --resume                   # Resume from latest checkpoint
+```
+
+### Monitoring Training
+
+- **Weights & Biases**: Training metrics are automatically logged. View at https://wandb.ai
+- **Checkpoints**: Saved to `checkpoints/` directory
+  - `dqn_latest.pt` - Latest checkpoint (updated periodically)
+  - `dqn_final.pt` - Final model after training
+  - `dqn_episode_N.pt` - Checkpoints at specific episodes
+
+### Using Trained Models
+
+Trained models can be loaded in the web interface:
+1. Start the server: `python main.py` or `.\Makefile.ps1 dev`
+2. Select "Watch Agent" mode
+3. Choose a checkpoint from the dropdown
+4. Click "Start Game" to watch the agent play
+
 ## API Endpoints
 
 | Endpoint | Method | Description |
@@ -181,11 +252,11 @@ make clean    # Remove cache files
 - [x] Leaderboard system
 
 ### In Progress
-- [ ] **RL Training Pipeline**
-  - [ ] Implement state encoding for neural network input
-  - [ ] Set up reward shaping (distance to food, survival bonus)
-  - [ ] Create training loop with experience replay
-  - [ ] Add DQN / PPO agent implementations
+- [x] **RL Training Pipeline**
+  - [x] Implement state encoding for neural network input
+  - [x] Set up reward shaping (distance to food, survival bonus)
+  - [x] Create training loop with experience replay
+  - [x] Add DQN agent implementation
 
 ### Planned
 - [ ] **Agent Visualization**
