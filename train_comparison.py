@@ -268,6 +268,8 @@ def main():
                        choices=["DQN", "PPO", "A2C", "all"],
                        default=["all"],
                        help="Which algorithms to train (default: all)")
+    parser.add_argument("--fresh", action="store_true",
+                       help="Start fresh instead of resuming from previous checkpoint")
     
     args = parser.parse_args()
     
@@ -283,9 +285,11 @@ def main():
     print(f"Algorithms: {', '.join(algorithms_to_train)}")
     print(f"Duration per algorithm: {args.duration} seconds")
     print(f"Wandb: {'Disabled' if args.no_wandb else f'Enabled (project: {args.project})'}")
+    print(f"Resume from checkpoint: {'No (fresh start)' if args.fresh else 'Yes (if available)'}")
     print(f"{'='*60}\n")
     
     results = []
+    checkpoint_dir = Path("checkpoints")
     
     # Train each algorithm
     for alg_name in algorithms_to_train:
@@ -300,6 +304,17 @@ def main():
                 memory_size=50000,  # Larger memory for more experience
                 batch_size=128  # Larger batches for more stable learning
             )
+            
+            # Try to load from previous checkpoint unless --fresh is specified
+            if not args.fresh:
+                # Look for the main checkpoint or most recent stage
+                main_checkpoint = checkpoint_dir / f"{alg_name.lower()}_agent.pt"
+                if main_checkpoint.exists():
+                    print(f"[RESUME] Found previous checkpoint: {main_checkpoint.name}")
+                    agent.load_checkpoint(str(main_checkpoint))
+                else:
+                    print(f"[NEW] No previous checkpoint found, starting fresh")
+                    
         elif alg_name == "PPO":
             agent = PPOAgent()
         elif alg_name == "A2C":

@@ -146,3 +146,17 @@ class DQNAgent(BaseAgent):
             'epsilon': self.epsilon,
             'episodes': self.episode,
         }, path)
+    
+    def load_checkpoint(self, path: str) -> bool:
+        """Load checkpoint from file. Returns True if successful."""
+        try:
+            checkpoint = torch.load(path, map_location=self.device)
+            self.model.load_state_dict(checkpoint['model_state_dict'])
+            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            self.epsilon = checkpoint.get('epsilon', self.epsilon_min)
+            self.episode = checkpoint.get('episodes', 0)
+            print(f"  Loaded checkpoint: epsilon={self.epsilon:.4f}, episodes={self.episode}")
+            return True
+        except Exception as e:
+            print(f"  Failed to load checkpoint: {e}")
+            return False
