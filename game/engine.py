@@ -111,9 +111,16 @@ class SnakeGame:
 
     def _spawn_walls(self) -> None:
         """Spawn random walls until the player eats a treat.
-        Walls are placed in empty cells, avoiding snake and food."""
+        Walls are placed in empty cells, avoiding snake and food.
+        Wall count scales with snake length - easier early, harder later."""
         # Clear existing walls
         self.walls = []
+        
+        # Scale wall count with snake length - no walls early, more walls as snake grows
+        snake_len = len(self.snake)
+        if snake_len < 5:
+            # No walls until snake reaches length 5 - learn basics first
+            return
         
         # Get all occupied cells (snake + food)
         occupied = set(self.snake)
@@ -131,11 +138,12 @@ class SnakeGame:
         if not empty_cells:
             return
         
-        # Spawn 3-6 walls randomly (adjust based on board size)
-        num_walls = random.randint(
-            min(3, len(empty_cells) // 4),
-            min(6, len(empty_cells) // 3)
-        )
+        # Scale walls with snake length: 1 wall per 5 length, max 8 walls
+        base_walls = (snake_len - 5) // 5 + 1  # 1 wall at length 5, 2 at 10, etc.
+        num_walls = min(base_walls, 8, len(empty_cells) // 4)
+        
+        if num_walls <= 0:
+            return
         
         # Randomly select wall positions
         wall_positions = random.sample(empty_cells, min(num_walls, len(empty_cells)))
@@ -196,11 +204,14 @@ class SnakeGame:
         # Check for collision
         if self._check_collision(new_head):
             self.game_over = True
-            # Death penalty scales with snake length (longer snake = more to lose)
-            death_penalty = -10.0 - len(self.snake)
+            # HARSH death penalty - scales significantly with snake length
+            # Dying with a long snake should be very costly to discourage risky behavior
+            snake_len = len(self.snake)
+            death_penalty = -100.0 - (snake_len * 10)  # Length 3 = -130, Length 10 = -200, Length 20 = -300
             return self.get_state(), death_penalty, True
 
         # Move snake
+        old_snake_length = len(self.snake)
         self.snake.insert(0, new_head)
         self.steps_since_last_treat += 1
 
@@ -209,26 +220,38 @@ class SnakeGame:
         old_distance = abs(old_head[0] - self.food[0]) + abs(old_head[1] - self.food[1])
         new_distance = abs(new_head[0] - self.food[0]) + abs(new_head[1] - self.food[1])
 
-        # SIMPLE REWARD: Treat collection speed is primary, direction is secondary
+        # REWARD STRUCTURE FOR SUPERHUMAN PLAY
         reward = 0.0
         
-        # Small direction incentive (not too strong to allow wall navigation)
+        # Direction incentive - stronger penalties for moving away
         if new_distance < old_distance:
-            reward += 0.1  # Moving closer to treat
+            reward += 0.5  # Moving closer to treat
         elif new_distance > old_distance:
-            reward -= 0.2  # Moving away from treat (penalize more than reward)
+            reward -= 1.0  # Moving away from treat - stronger penalty
         
         if new_head == self.food:
             # TREAT COLLECTED! Reward based on speed
-            # Faster collection = higher reward
-            # Formula: base_reward * (max_steps - steps_taken) / max_steps
-            # This gives higher reward for fewer steps
-            max_reasonable_steps = self.width + self.height  # Manhattan distance upper bound
+            max_reasonable_steps = self.width + self.height
             speed_multiplier = max(0.1, (max_reasonable_steps - self.steps_since_last_treat) / max_reasonable_steps)
             
             # Base reward scaled by treat value and speed
             base_reward = float(self.food_points * 10)
-            reward = base_reward * (1.0 + speed_multiplier)  # 1.0 to 2.0x multiplier based on speed
+            reward = base_reward * (1.0 + speed_multiplier)
+            
+            # MILESTONE BONUSES - reward for growing longer
+            new_length = len(self.snake)  # After eating, snake is longer
+            if new_length >= 5 and old_snake_length < 5:
+                reward += 50.0  # First milestone: length 5
+            if new_length >= 10 and old_snake_length < 10:
+                reward += 100.0  # Second milestone: length 10
+            if new_length >= 15 and old_snake_length < 15:
+                reward += 150.0  # Third milestone: length 15
+            if new_length >= 20 and old_snake_length < 20:
+                reward += 200.0  # Fourth milestone: length 20
+            if new_length >= 30 and old_snake_length < 30:
+                reward += 300.0  # Fifth milestone: length 30
+            if new_length >= 50 and old_snake_length < 50:
+                reward += 500.0  # Superhuman milestone: length 50
             
             # Add points to score
             self.score += self.food_points
@@ -241,9 +264,8 @@ class SnakeGame:
             # Remove tail if no food eaten
             self.snake.pop()
             
-            # Small time pressure: slight negative reward per step to encourage speed
-            # But not so much that it discourages survival
-            reward = -0.01
+            # Time pressure - encourages faster play but not too harsh
+            reward -= 0.05
 
         return self.get_state(), reward, False
 
