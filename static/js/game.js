@@ -318,128 +318,96 @@ class GameController {
         this.checkpointSelect.innerHTML = '<option value="">Default Agent (Heuristic)</option>';
 
         if (Array.isArray(checkpoints) && checkpoints.length > 0) {
-            // Group checkpoints by algorithm and run, then sort stages
-            const grouped = {};
+            // Group checkpoints by timestamp (training run)
+            const runs = {};
             const timestamps = [];
             
-            // First pass: collect all checkpoints and timestamps
             checkpoints.forEach(checkpoint => {
                 const checkpointValue = typeof checkpoint === 'string' 
                     ? checkpoint 
                     : (checkpoint.path || checkpoint.name || checkpoint);
                 
-                // Extract algorithm name, timestamp, and stage
-                // Pattern: algo_agent_20250125_123456_stage01.pt or algo_agent_stage01.pt (old format)
+                // Pattern: algo_agent_20250125_123456_stage01.pt or algo_agent_stage01.pt
                 const timestampMatch = checkpointValue.match(/^(.+?)_agent_(\d{8}_\d{6})(_stage(\d+))?\.pt$/);
                 const oldMatch = checkpointValue.match(/^(.+?)_agent(_stage(\d+))?\.pt$/);
                 
                 if (timestampMatch) {
-                    // New format with timestamp
-                    const algoName = timestampMatch[1];
+                    const algoName = timestampMatch[1].toUpperCase();
                     const timestamp = timestampMatch[2];
-                    const stageNum = timestampMatch[4] ? parseInt(timestampMatch[4]) : 999;
+                    const stageNum = timestampMatch[4] ? parseInt(timestampMatch[4]) : 10;
                     
-                    // Collect timestamp for finding newest
-                    if (!timestamps.includes(timestamp)) {
-                        timestamps.push(timestamp);
-                    }
+                    if (!timestamps.includes(timestamp)) timestamps.push(timestamp);
                     
-                    const key = `${algoName}_${timestamp}`;
-                    if (!grouped[key]) {
-                        grouped[key] = { algoName, timestamp, items: [] };
-                    }
-                    grouped[key].items.push({ value: checkpointValue, stage: stageNum });
+                    if (!runs[timestamp]) runs[timestamp] = { algoName, items: [] };
+                    runs[timestamp].items.push({ value: checkpointValue, stage: stageNum });
                 } else if (oldMatch) {
-                    // Old format without timestamp
-                    const algoName = oldMatch[1];
-                    const stageNum = oldMatch[3] ? parseInt(oldMatch[3]) : 999;
+                    const algoName = oldMatch[1].toUpperCase();
+                    const stageNum = oldMatch[3] ? parseInt(oldMatch[3]) : 10;
                     
-                    const key = `${algoName}_old`;
-                    if (!grouped[key]) {
-                        grouped[key] = { algoName, timestamp: 'old', items: [] };
-                    }
-                    grouped[key].items.push({ value: checkpointValue, stage: stageNum });
-                } else {
-                    // Handle non-standard checkpoint names
-                    if (!grouped['other_old']) {
-                        grouped['other_old'] = { algoName: 'other', timestamp: 'old', items: [] };
-                    }
-                    grouped['other_old'].items.push({ value: checkpointValue, stage: 999 });
+                    if (!runs['old']) runs['old'] = { algoName, items: [] };
+                    runs['old'].items.push({ value: checkpointValue, stage: stageNum });
                 }
             });
             
-            // Find the most recent timestamp (newest training run)
-            const newestTimestamp = timestamps.length > 0 
-                ? timestamps.sort().reverse()[0]  // Sort descending, take first
-                : null;
+            // Sort timestamps newest first
+            timestamps.sort().reverse();
+            const newestTimestamp = timestamps[0];
             
-            // Sort by timestamp (newest first) and algorithm name, then by stage
-            Object.keys(grouped).sort((a, b) => {
-                const groupA = grouped[a];
-                const groupB = grouped[b];
-                // Sort by timestamp (newer first), then by algorithm name
-                if (groupA.timestamp !== groupB.timestamp) {
-                    if (groupA.timestamp === 'old') return 1;
-                    if (groupB.timestamp === 'old') return -1;
-                    return groupB.timestamp.localeCompare(groupA.timestamp); // Newest first
-                }
-                return groupA.algoName.localeCompare(groupB.algoName);
-            }).forEach(key => {
-                const group = grouped[key];
-                const items = group.items;
-                items.sort((a, b) => a.stage - b.stage);
+            // Add newest run first with clear labeling
+            if (newestTimestamp && runs[newestTimestamp]) {
+                const run = runs[newestTimestamp];
+                run.items.sort((a, b) => a.stage - b.stage);
                 
-                // Determine if this is the newest training run
-                const isNewest = group.timestamp !== 'old' && group.timestamp === newestTimestamp;
+                // Add separator for newest
+                const separator = document.createElement('option');
+                separator.disabled = true;
+                separator.textContent = `── LATEST (${run.algoName}) ──`;
+                this.checkpointSelect.appendChild(separator);
                 
-                // Format timestamp for display
-                let runLabel = '';
-                if (isNewest) {
-                    // Parse timestamp: 20250125_123456 -> Jan 25, 12:34:56
-                    const ts = group.timestamp;
-                    const date = ts.substring(0, 8);
-                    const time = ts.substring(9);
-                    const month = date.substring(4, 6);
-                    const day = date.substring(6, 8);
-                    const hour = time.substring(0, 2);
-                    const min = time.substring(2, 4);
-                    runLabel = ` [NEW - ${month}/${day} ${hour}:${min}]`;
-                } else if (group.timestamp !== 'old') {
-                    // Show timestamp for older runs
-                    const ts = group.timestamp;
-                    const date = ts.substring(0, 8);
-                    const time = ts.substring(9);
-                    const month = date.substring(4, 6);
-                    const day = date.substring(6, 8);
-                    const hour = time.substring(0, 2);
-                    const min = time.substring(2, 4);
-                    runLabel = ` (${month}/${day} ${hour}:${min})`;
-                } else {
-                    runLabel = ' (Previous)';
-                }
-                
-                items.forEach(item => {
-                    const checkpointValue = item.value;
-                    let checkpointLabel = '';
-                    
-                    // Format label nicely
-                    if (item.stage < 999) {
-                        checkpointLabel = `${group.algoName.toUpperCase()} - Stage ${item.stage}/10${runLabel}`;
-                    } else {
-                        checkpointLabel = `${group.algoName.toUpperCase()} (final)${runLabel}`;
-                    }
-                    
+                run.items.forEach(item => {
                     const option = document.createElement('option');
-                    option.value = checkpointValue;
-                    option.textContent = checkpointLabel;
-                    // Highlight newest checkpoints only
-                    if (isNewest) {
-                        option.style.fontWeight = 'bold';
-                        option.style.color = '#00ff00';
-                    }
+                    option.value = item.value;
+                    option.textContent = `Stage ${item.stage}`;
+                    option.style.fontWeight = 'bold';
                     this.checkpointSelect.appendChild(option);
                 });
-            });
+            }
+            
+            // Add older runs collapsed
+            const olderTimestamps = timestamps.slice(1);
+            if (olderTimestamps.length > 0 || runs['old']) {
+                const separator = document.createElement('option');
+                separator.disabled = true;
+                separator.textContent = `── PREVIOUS RUNS ──`;
+                this.checkpointSelect.appendChild(separator);
+                
+                // Show older timestamped runs
+                olderTimestamps.forEach(ts => {
+                    const run = runs[ts];
+                    run.items.sort((a, b) => b.stage - a.stage); // Highest stage first
+                    const bestStage = run.items[0]; // Just show best stage
+                    
+                    const month = ts.substring(4, 6);
+                    const day = ts.substring(6, 8);
+                    const hour = ts.substring(9, 11);
+                    const min = ts.substring(11, 13);
+                    
+                    const option = document.createElement('option');
+                    option.value = bestStage.value;
+                    option.textContent = `${run.algoName} ${month}/${day} ${hour}:${min} (Best)`;
+                    this.checkpointSelect.appendChild(option);
+                });
+                
+                // Show old format checkpoints
+                if (runs['old']) {
+                    runs['old'].items.sort((a, b) => b.stage - a.stage);
+                    const bestOld = runs['old'].items[0];
+                    const option = document.createElement('option');
+                    option.value = bestOld.value;
+                    option.textContent = `${runs['old'].algoName} (Legacy)`;
+                    this.checkpointSelect.appendChild(option);
+                }
+            }
         }
         // If no checkpoints, default option is already set above
     }

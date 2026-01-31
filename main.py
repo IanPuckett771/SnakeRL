@@ -294,7 +294,7 @@ async def run_agent_loop(
     game: SnakeGame,
     agent: AgentInterface,
     snake_color: str,
-    delay: float = 0.2,  # Increased from 0.1 to 0.2 for better viewing
+    delay: float = 0.4,  # Slower playback for easier viewing
 ):
     """Run the agent loop, sending state updates with delay.
 
