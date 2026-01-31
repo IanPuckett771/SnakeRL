@@ -159,6 +159,7 @@ def train_algorithm(agent, algorithm_name, duration_seconds=60, use_wandb=True,
                             "duration": duration_seconds,
                             "episodes": episode,
                             "avg_score": avg_score,
+                            "avg_snake_length": avg_snake_length,
                             "algorithm": algorithm_name,
                         }, f)
                 except:
