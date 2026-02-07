@@ -14,7 +14,7 @@ from .base import BaseAgent, encode_state
 class A2CNetwork(nn.Module):
     """A2C Actor-Critic Network."""
     
-    def __init__(self, state_size=12, action_size=4, hidden_size=128):
+    def __init__(self, state_size=24, action_size=4, hidden_size=256):
         super(A2CNetwork, self).__init__()
         # Shared layers
         self.shared = nn.Sequential(

@@ -18,7 +18,7 @@ if TORCH_AVAILABLE:
     class SimpleDQN(nn.Module):
         """Simple Deep Q-Network for Snake."""
         
-        def __init__(self, state_size=12, action_size=4, hidden_size=128):
+        def __init__(self, state_size=24, action_size=4, hidden_size=256):
             super(SimpleDQN, self).__init__()
             self.fc1 = nn.Linear(state_size, hidden_size)
             self.fc2 = nn.Linear(hidden_size, hidden_size)
@@ -62,7 +62,7 @@ class AgentInterface:
         if os.path.exists(path):
             try:
                 checkpoint = torch.load(path, map_location=self.device)
-                self.model = SimpleDQN(state_size=12, action_size=4).to(self.device)
+                self.model = SimpleDQN(state_size=24, action_size=4).to(self.device)
                 if 'model_state_dict' in checkpoint:
                     self.model.load_state_dict(checkpoint['model_state_dict'])
                 else:

@@ -18,7 +18,7 @@ from game.state import GameState
 class DQN(nn.Module):
     """Simple Deep Q-Network for Snake."""
     
-    def __init__(self, state_size=12, action_size=4, hidden_size=128):
+    def __init__(self, state_size=24, action_size=4, hidden_size=256):
         super(DQN, self).__init__()
         self.fc1 = nn.Linear(state_size, hidden_size)
         self.fc2 = nn.Linear(hidden_size, hidden_size)
@@ -80,7 +80,7 @@ def encode_state(state: GameState) -> np.ndarray:
 class DQNAgent:
     """DQN Agent for training."""
     
-    def __init__(self, state_size=12, action_size=4):
+    def __init__(self, state_size=24, action_size=4):
         self.state_size = state_size
         self.action_size = action_size
         self.memory = deque(maxlen=10000)
@@ -155,7 +155,7 @@ def train_agent(duration_seconds=60):
         }, f)
     
     game = SnakeGame(width=20, height=20)
-    agent = DQNAgent(state_size=12, action_size=4)
+    agent = DQNAgent(state_size=24, action_size=4)
     
     episode = 0
     scores = []

@@ -221,13 +221,15 @@ class SnakeGame:
         new_distance = abs(new_head[0] - self.food[0]) + abs(new_head[1] - self.food[1])
 
         # REWARD STRUCTURE FOR SUPERHUMAN PLAY
+        # Key insight: direction incentive must be SOFT to allow detours around body
         reward = 0.0
         
-        # Direction incentive - stronger penalties for moving away
+        # Soft direction incentive - allows the snake to take detours when needed
+        # The snake now has body awareness in its state, so it can learn WHEN to detour
         if new_distance < old_distance:
-            reward += 0.5  # Moving closer to treat
+            reward += 0.1   # Small nudge toward food (was 0.5 - too aggressive)
         elif new_distance > old_distance:
-            reward -= 1.0  # Moving away from treat - stronger penalty
+            reward -= 0.15  # Gentle penalty for moving away (was -1.0 - forced beelining)
         
         if new_head == self.food:
             # TREAT COLLECTED! Reward based on speed
@@ -241,17 +243,17 @@ class SnakeGame:
             # MILESTONE BONUSES - reward for growing longer
             new_length = len(self.snake)  # After eating, snake is longer
             if new_length >= 5 and old_snake_length < 5:
-                reward += 50.0  # First milestone: length 5
+                reward += 50.0
             if new_length >= 10 and old_snake_length < 10:
-                reward += 100.0  # Second milestone: length 10
+                reward += 100.0
             if new_length >= 15 and old_snake_length < 15:
-                reward += 150.0  # Third milestone: length 15
+                reward += 150.0
             if new_length >= 20 and old_snake_length < 20:
-                reward += 200.0  # Fourth milestone: length 20
+                reward += 200.0
             if new_length >= 30 and old_snake_length < 30:
-                reward += 300.0  # Fifth milestone: length 30
+                reward += 300.0
             if new_length >= 50 and old_snake_length < 50:
-                reward += 500.0  # Superhuman milestone: length 50
+                reward += 500.0
             
             # Add points to score
             self.score += self.food_points
@@ -265,7 +267,7 @@ class SnakeGame:
             self.snake.pop()
             
             # Time pressure - encourages faster play but not too harsh
-            reward -= 0.05
+            reward -= 0.03
 
         return self.get_state(), reward, False
 
