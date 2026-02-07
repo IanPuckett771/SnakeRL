@@ -13,5 +13,11 @@ websockets
 torch
 numpy
 
+# JIT Compilation (optional but recommended for PPO performance)
+numba
+
 # Experiment Tracking
 wandb
+
+# Testing
+pytest
