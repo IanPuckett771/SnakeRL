@@ -12,19 +12,21 @@ from .base import BaseAgent, encode_state
 
 
 class DQNNetwork(nn.Module):
-    """DQN Neural Network."""
+    """DQN Neural Network - deeper architecture for richer state."""
     
-    def __init__(self, state_size=12, action_size=4, hidden_size=128):
+    def __init__(self, state_size=24, action_size=4, hidden_size=256):
         super(DQNNetwork, self).__init__()
         self.fc1 = nn.Linear(state_size, hidden_size)
         self.fc2 = nn.Linear(hidden_size, hidden_size)
-        self.fc3 = nn.Linear(hidden_size, action_size)
+        self.fc3 = nn.Linear(hidden_size, 128)
+        self.fc4 = nn.Linear(128, action_size)
         self.relu = nn.ReLU()
         
     def forward(self, x):
         x = self.relu(self.fc1(x))
         x = self.relu(self.fc2(x))
-        return self.fc3(x)
+        x = self.relu(self.fc3(x))
+        return self.fc4(x)
 
 
 class DQNAgent(BaseAgent):
