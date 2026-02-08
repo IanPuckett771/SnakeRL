@@ -138,6 +138,24 @@ def main():
         type=str,
         help="Name for this training run",
     )
+    parser.add_argument(
+        "--eval-interval",
+        type=int,
+        default=10000,
+        help="Steps between evaluations (default: 10000)",
+    )
+    parser.add_argument(
+        "--checkpoint-interval",
+        type=int,
+        default=25000,
+        help="Steps between checkpoints (default: 25000)",
+    )
+    parser.add_argument(
+        "--duration",
+        type=int,
+        default=None,
+        help="Max training duration in minutes (optional time limit)",
+    )
 
     args = parser.parse_args()
 
@@ -165,7 +183,8 @@ def main():
     # Print device info
     print("Device info:", get_device_info())
     print(f"Using device: {get_device()}")
-    print(f"Training {config['algorithm']} on {config['game']} for {args.steps} steps")
+    duration_str = f" (max {args.duration} min)" if args.duration else ""
+    print(f"Training {config['algorithm']} on {config['game']} for {args.steps} steps{duration_str}")
 
     # Create environment and agent
     env_fn = create_env_fn(config)
@@ -183,11 +202,13 @@ def main():
     )
 
     # Train
+    max_duration_seconds = args.duration * 60 if args.duration else None
     results = trainer.train(
         total_steps=args.steps,
-        eval_interval=1000,
-        checkpoint_interval=5000,
-        log_interval=100,
+        eval_interval=args.eval_interval,
+        checkpoint_interval=args.checkpoint_interval,
+        log_interval=500,
+        max_duration_seconds=max_duration_seconds,
     )
 
     print("\nTraining complete!")

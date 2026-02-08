@@ -72,6 +72,20 @@ async def get_checkpoint_info(checkpoint_name: str):
         return {"error": str(e)}, 500
 
 
+@app.get("/best-replay")
+async def get_best_replay():
+    """Return the saved best game replay."""
+    replay_file = CHECKPOINTS_DIR / "best_replay.json"
+    if not replay_file.exists():
+        return {"error": "No best replay saved yet"}
+    try:
+        with open(replay_file, 'r') as f:
+            data = json.load(f)
+        return data
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/training-status")
 async def get_training_status():
     """Check if training is currently running by looking for training lock file."""
@@ -240,7 +254,8 @@ async def websocket_game(websocket: WebSocket):
                         checkpoint_path = CHECKPOINTS_DIR / checkpoint
                         agent.load_checkpoint(str(checkpoint_path))
                     session.game_task = asyncio.create_task(
-                        run_agent_loop(websocket, session.game, agent, session.snake_color)
+                        run_agent_loop(websocket, session.game, agent, session.snake_color,
+                                       delay=session.speed)
                     )
                 else:
                     # Play mode - start auto-move loop
@@ -294,7 +309,7 @@ async def run_agent_loop(
     game: SnakeGame,
     agent: AgentInterface,
     snake_color: str,
-    delay: float = 0.4,  # Slower playback for easier viewing
+    delay: float = 0.3,  # Default playback speed (overridden by user's speed setting)
 ):
     """Run the agent loop, sending state updates with delay.
 

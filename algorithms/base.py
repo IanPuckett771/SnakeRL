@@ -5,26 +5,27 @@ from typing import Tuple
 from game.state import GameState
 
 
-def _is_blocked(x, y, width, height, snake_set, wall_set):
-    """Check if a position is blocked (wall, body, or out of bounds)."""
-    return (x < 0 or x >= width or y < 0 or y >= height or
-            (x, y) in snake_set or (x, y) in wall_set)
+# Pre-allocated direction tuples for speed
+_DIRECTIONS_4 = ((0, -1), (0, 1), (-1, 0), (1, 0))  # up, down, left, right
+_DIR_MAP = {"up": 0, "down": 1, "left": 2, "right": 3}
+_DIR_VECTORS = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}
 
 
-def _flood_fill_count(start_x, start_y, width, height, snake_set, wall_set, max_count=50):
-    """Count reachable cells from a position using BFS (capped for performance)."""
-    if _is_blocked(start_x, start_y, width, height, snake_set, wall_set):
+def _flood_fill_fast(start_x, start_y, width, height, blocked_set, max_count=100):
+    """Fast flood fill using BFS. Cap at 100 cells for better space awareness at long lengths."""
+    if (start_x < 0 or start_x >= width or start_y < 0 or start_y >= height or
+            (start_x, start_y) in blocked_set):
         return 0
-    visited = set()
-    visited.add((start_x, start_y))
-    queue = deque([(start_x, start_y)])
+    visited = {(start_x, start_y)}
+    queue = deque(((start_x, start_y),))
     count = 0
     while queue and count < max_count:
         x, y = queue.popleft()
         count += 1
-        for dx, dy in [(0, -1), (0, 1), (-1, 0), (1, 0)]:
-            nx, ny = x + dx, y + dy
-            if (nx, ny) not in visited and not _is_blocked(nx, ny, width, height, snake_set, wall_set):
+        for ddx, ddy in _DIRECTIONS_4:
+            nx, ny = x + ddx, y + ddy
+            if (0 <= nx < width and 0 <= ny < height and
+                    (nx, ny) not in visited and (nx, ny) not in blocked_set):
                 visited.add((nx, ny))
                 queue.append((nx, ny))
     return count
@@ -32,6 +33,8 @@ def _flood_fill_count(start_x, start_y, width, height, snake_set, wall_set, max_
 
 def encode_state(state: GameState) -> np.ndarray:
     """Encode game state into a rich feature vector for the neural network.
+    
+    Optimized: uses fast flood fill (cap=20), pre-built sets, minimal allocations.
     
     Features (24 total):
     - Head position (2): normalized x, y
@@ -44,91 +47,76 @@ def encode_state(state: GameState) -> np.ndarray:
     - Tail direction (2): normalized dx, dy from head to tail
     - Body density ahead (1): fraction of body segments in front of snake
     """
-    head_x, head_y = state.snake[0]
+    snake = state.snake
+    head_x, head_y = snake[0]
     food_x, food_y = state.food
-    tail_x, tail_y = state.snake[-1]
+    tail_x, tail_y = snake[-1]
     
     width, height = state.width, state.height
-    board_area = width * height
     
-    snake_set = set(state.snake[:-1])  # Exclude tail (it will move)
+    # Build blocked set once (body excluding tail for collision, full body for flood fill)
+    snake_body_set = set(snake[:-1])
     wall_set = set(state.walls) if state.walls else set()
-    full_blocked = snake_set | wall_set  # For flood fill, include all body
+    blocked_collision = snake_body_set | wall_set
+    blocked_flood = set(snake) | wall_set  # Conservative for flood fill
     
-    # Direction one-hot encoding
-    direction_map = {"up": 0, "down": 1, "left": 2, "right": 3}
-    direction_idx = direction_map.get(state.direction, 0)
-    direction_onehot = [0.0] * 4
-    direction_onehot[direction_idx] = 1.0
+    # Direction one-hot encoding (avoid list allocation)
+    direction_idx = _DIR_MAP.get(state.direction, 0)
     
-    # Immediate danger (1 cell ahead) in 4 directions
-    directions = [(0, -1), (0, 1), (-1, 0), (1, 0)]  # up, down, left, right
-    dangers_1 = []
-    dangers_2 = []
-    reachable_space = []
+    # Pre-allocate output array
+    features = np.zeros(24, dtype=np.float32)
     
-    for dx, dy in directions:
-        nx1, ny1 = head_x + dx, head_y + dy
-        nx2, ny2 = head_x + 2*dx, head_y + 2*dy
-        
-        # 1-step danger
-        is_danger_1 = _is_blocked(nx1, ny1, width, height, snake_set, wall_set)
-        dangers_1.append(1.0 if is_danger_1 else 0.0)
-        
-        # 2-step danger
-        is_danger_2 = _is_blocked(nx2, ny2, width, height, snake_set, wall_set)
-        dangers_2.append(1.0 if is_danger_2 else 0.0)
-        
-        # Reachable space from this neighbor (how much room if we go this way)
-        if is_danger_1:
-            reachable_space.append(0.0)
-        else:
-            # Use full snake set for flood fill (conservative)
-            full_snake_set = set(state.snake)
-            count = _flood_fill_count(nx1, ny1, width, height, full_snake_set, wall_set, max_count=50)
-            reachable_space.append(count / 50.0)  # Normalize to [0, 1]
+    # Head position (normalized)
+    features[0] = head_x / width
+    features[1] = head_y / height
     
     # Food direction (normalized)
-    food_dx = (food_x - head_x) / width if width > 0 else 0
-    food_dy = (food_y - head_y) / height if height > 0 else 0
+    features[2] = (food_x - head_x) / width
+    features[3] = (food_y - head_y) / height
     
-    # Tail direction (normalized) - helps snake follow its tail
-    tail_dx = (tail_x - head_x) / width if width > 0 else 0
-    tail_dy = (tail_y - head_y) / height if height > 0 else 0
+    # Direction one-hot
+    features[4 + direction_idx] = 1.0
+    
+    # Danger + reachable space per direction
+    for i, (dx, dy) in enumerate(_DIRECTIONS_4):
+        nx1, ny1 = head_x + dx, head_y + dy
+        
+        # 1-step danger
+        blocked_1 = (nx1 < 0 or nx1 >= width or ny1 < 0 or ny1 >= height or
+                     (nx1, ny1) in blocked_collision)
+        if blocked_1:
+            features[8 + i] = 1.0   # danger_1
+            features[12 + i] = 1.0  # danger_2 (also blocked)
+            features[16 + i] = 0.0  # reachable = 0
+        else:
+            # 2-step danger
+            nx2, ny2 = head_x + 2*dx, head_y + 2*dy
+            if (nx2 < 0 or nx2 >= width or ny2 < 0 or ny2 >= height or
+                    (nx2, ny2) in blocked_collision):
+                features[12 + i] = 1.0
+            
+            # Reachable space (fast flood fill, cap=100 for long snake awareness)
+            count = _flood_fill_fast(nx1, ny1, width, height, blocked_flood, max_count=100)
+            features[16 + i] = count / 100.0
     
     # Snake length normalized
-    snake_length_norm = len(state.snake) / board_area
+    snake_len = len(snake)
+    features[20] = snake_len / (width * height)
     
-    # Body density ahead of snake (in the direction we're moving)
-    dir_vectors = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}
-    move_dx, move_dy = dir_vectors.get(state.direction, (1, 0))
+    # Tail direction (normalized)
+    features[21] = (tail_x - head_x) / width
+    features[22] = (tail_y - head_y) / height
+    
+    # Body density ahead
+    move_dx, move_dy = _DIR_VECTORS.get(state.direction, (1, 0))
     body_ahead = 0
-    for bx, by in state.snake[1:]:
-        # Check if body segment is "ahead" (in the direction of movement)
-        rel_x = bx - head_x
-        rel_y = by - head_y
-        # Dot product with movement direction
-        if rel_x * move_dx + rel_y * move_dy > 0:
+    for j in range(1, snake_len):
+        bx, by = snake[j]
+        if (bx - head_x) * move_dx + (by - head_y) * move_dy > 0:
             body_ahead += 1
-    body_density_ahead = body_ahead / max(len(state.snake) - 1, 1)
+    features[23] = body_ahead / max(snake_len - 1, 1)
     
-    # Combine all features (24 features total)
-    features = [
-        head_x / width if width > 0 else 0,       # 1: head x
-        head_y / height if height > 0 else 0,      # 2: head y
-        food_dx,                                     # 3: food direction x
-        food_dy,                                     # 4: food direction y
-        *direction_onehot,                           # 5-8: current direction
-        *dangers_1,                                  # 9-12: immediate danger
-        *dangers_2,                                  # 13-16: 2-step danger
-        *reachable_space,                            # 17-20: reachable space per direction
-        snake_length_norm,                           # 21: snake length
-        tail_dx,                                     # 22: tail direction x
-        tail_dy,                                     # 23: tail direction y
-        body_density_ahead,                          # 24: body density ahead
-    ]
-    
-    return np.array(features, dtype=np.float32)
+    return features
 
 
 class BaseAgent:
