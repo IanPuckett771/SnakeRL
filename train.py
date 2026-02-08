@@ -1,6 +1,6 @@
 """
-Simple DQN training script for SnakeRL.
-Trains an agent for approximately 1 minute and saves a checkpoint.
+DEPRECATED: Legacy DQN training script using flat feature vectors.
+Use train_comparison.py instead, which trains with the CNN encoder.
 """
 import time
 import random
