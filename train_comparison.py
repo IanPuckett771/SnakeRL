@@ -19,7 +19,7 @@ NUM_PARALLEL_GAMES_CNN = 8  # Lightweight CNN runs at similar speed to flat MLP
 
 def train_algorithm(agent, algorithm_name, duration_seconds=60, use_wandb=True,
                    project_name="snakerl-comparison", run_id=None,
-                   early_stop_patience=200, early_stop_min_episodes=100):
+                   early_stop_patience=500, early_stop_min_episodes=100):
     """Train a single algorithm with parallel game environments.
 
     Args:
@@ -331,8 +331,8 @@ def main():
                        help="Start fresh instead of resuming from previous checkpoint")
     parser.add_argument("--cnn", action="store_true",
                        help="Use CNN-based DQN (sees entire board) instead of flat features")
-    parser.add_argument("--early-stop-patience", type=int, default=200,
-                       help="Stop if no improvement in this many episodes (0 to disable, default: 200)")
+    parser.add_argument("--early-stop-patience", type=int, default=500,
+                       help="Stop if no improvement in this many episodes (0 to disable, default: 500)")
     parser.add_argument("--early-stop-min-episodes", type=int, default=100,
                        help="Minimum episodes before early stopping can trigger (default: 100)")
 

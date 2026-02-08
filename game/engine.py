@@ -220,11 +220,11 @@ class SnakeGame:
         # Check for collision
         if self._check_collision(new_head):
             self.game_over = True
-            # HARSH death penalty - scales significantly with snake length
-            # Dying with a long snake should be very costly to discourage risky behavior
+            # Death penalty scales with snake length but is clamped to [-10, -1]
+            # to stay in the same order of magnitude as other rewards
             snake_len = len(self.snake)
-            death_penalty = -100.0 - (snake_len * 10)  # Length 3 = -130, Length 10 = -200, Length 20 = -300
-            return self.get_state(), death_penalty, True
+            death_penalty = -1.0 - (snake_len / (self.width * self.height)) * 9.0  # len 3 ≈ -1.07, len 200 ≈ -5.5, len 400 = -10
+            return self.get_state(), max(death_penalty, -10.0), True
 
         # Move snake
         old_snake_length = len(self.snake)
@@ -243,32 +243,34 @@ class SnakeGame:
         # - Softer direction incentive so snake can take necessary detours
         reward = 0.0
         
-        # Soft direction incentive - allows detours around body
+        # Symmetric direction incentive - no extra punishment for necessary detours
         if new_distance < old_distance:
             reward += 0.1
         elif new_distance > old_distance:
-            reward -= 0.15
+            reward -= 0.1
         
         if new_head == self.food:
             # TREAT COLLECTED! Reward based on speed
-            max_reasonable_steps = self.width + self.height
+            # Scale max steps with snake length — long snakes need more steps to navigate
+            snake_len = len(self.snake)
+            max_reasonable_steps = (self.width + self.height) + snake_len
             speed_multiplier = max(0.1, (max_reasonable_steps - self.steps_since_last_treat) / max_reasonable_steps)
-            
-            # Base reward scaled by treat value and speed
+
+            # Base reward scaled by treat value, speed, and snake length
+            # Longer snakes work harder to collect food — reward that proportionally
+            length_multiplier = 1.0 + (snake_len / (self.width * self.height))
             base_reward = float(self.food_points * 10)
-            reward = base_reward * (1.0 + speed_multiplier)
+            reward = base_reward * (1.0 + speed_multiplier) * length_multiplier
             
-            # MILESTONE BONUSES - scaled up dramatically for long snakes
+            # MILESTONE BONUSES - capped at 10x the current food reward
+            # Keeps milestones meaningful but prevents gradient-exploding spikes
             new_length = len(self.snake)
-            milestones = [
-                (5, 50), (10, 100), (15, 150), (20, 200),
-                (30, 300), (50, 500), (75, 750), (100, 1000),
-                (150, 1500), (200, 2000), (250, 3000), (300, 4000),
-                (350, 5000), (375, 7500), (390, 10000), (400, 20000),
-            ]
-            for threshold, bonus in milestones:
+            milestone_cap = reward * 10  # 10x whatever the food reward was
+            milestones = [5, 10, 15, 20, 30, 50, 75, 100, 150, 200, 250, 300, 350, 375, 390, 400]
+            for threshold in milestones:
                 if new_length >= threshold and old_snake_length < threshold:
-                    reward += bonus
+                    reward += milestone_cap
+                    break  # Only one milestone per food collection
             
             # Add points to score
             self.score += self.food_points
@@ -279,7 +281,7 @@ class SnakeGame:
         else:
             # Remove tail if no food eaten
             self.snake.pop()
-            
+
             # Time pressure SCALES with snake length:
             # Short snake (len 3-20): -0.03 per step (move quickly!)
             # Long snake (len 50+): -0.01 per step (more time to navigate)
@@ -296,6 +298,14 @@ class SnakeGame:
             else:
                 time_penalty = 0.005
             reward -= time_penalty
+
+            # Survival reward — continuous positive signal for staying alive with a long snake
+            # Bridges gaps between milestones and food collections
+            board_area = self.width * self.height
+            reward += 0.001 * (snake_len / board_area)
+
+        # Clamp total step reward to bounded range for training stability
+        reward = max(-10.0, min(reward, 50.0))
 
         return self.get_state(), reward, False
 
