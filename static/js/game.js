@@ -160,6 +160,14 @@ class GameController {
         this.snakeColorInput.addEventListener('input', (e) => {
             this.snakeColor = e.target.value;
         });
+
+        // Live speed change — send to server without resetting
+        this.gameSpeedSelect.addEventListener('change', () => {
+            const speed = parseFloat(this.gameSpeedSelect.value) || 0.15;
+            if (wsManager.isConnected()) {
+                wsManager.send({ type: 'set_speed', speed });
+            }
+        });
     }
 
     /**
@@ -298,11 +306,16 @@ class GameController {
             const data = await response.json();
             // Backend returns {checkpoints: [...]}, so extract the array
             const checkpoints = data.checkpoints || data;
-            this.populateCheckpointDropdown(checkpoints);
+            this.populateCheckpointDropdown(checkpoints, data.best_replay || null);
             
-            // Restore selection if it still exists
-            if (currentSelection && this.checkpointSelect.querySelector(`option[value="${currentSelection}"]`)) {
-                this.checkpointSelect.value = currentSelection;
+            // Restore selection if it still exists in the new options
+            if (currentSelection) {
+                const hasOption = Array.from(this.checkpointSelect.options).some(
+                    opt => opt.value === currentSelection
+                );
+                if (hasOption) {
+                    this.checkpointSelect.value = currentSelection;
+                }
             }
         } catch (error) {
             console.error('Error fetching checkpoints:', error);
@@ -315,27 +328,33 @@ class GameController {
      * Groups by training run, shows date/time, stage progression, and best result.
      * @param {Array} checkpoints - Array of checkpoint objects
      */
-    populateCheckpointDropdown(checkpoints) {
+    populateCheckpointDropdown(checkpoints, bestReplay) {
         this.checkpointSelect.innerHTML = '';
-        
+
         // Default option
         const defaultOpt = document.createElement('option');
         defaultOpt.value = '';
         defaultOpt.textContent = 'Default Agent (Heuristic)';
         this.checkpointSelect.appendChild(defaultOpt);
-        
-        // Best Replay option (always available)
-        const replaySep = document.createElement('option');
-        replaySep.disabled = true;
-        replaySep.textContent = '━━ ★ BEST SINGLE GAME EVER ━━';
-        replaySep.style.fontWeight = 'bold';
-        this.checkpointSelect.appendChild(replaySep);
-        
-        const replayOpt = document.createElement('option');
-        replayOpt.value = '__best_replay__';
-        replayOpt.textContent = '▶ Watch Best Game (Length: 102, Score: 252)';
-        replayOpt.style.fontWeight = 'bold';
-        this.checkpointSelect.appendChild(replayOpt);
+
+        // Best Replay option — only show when replay data exists
+        if (bestReplay) {
+            const replaySep = document.createElement('option');
+            replaySep.disabled = true;
+            replaySep.textContent = '━━ ★ BEST SINGLE GAME EVER ━━';
+            replaySep.style.fontWeight = 'bold';
+            this.checkpointSelect.appendChild(replaySep);
+
+            const replayOpt = document.createElement('option');
+            replayOpt.value = '__best_replay__';
+            const parts = [];
+            if (bestReplay.length != null) parts.push(`Length: ${bestReplay.length}`);
+            if (bestReplay.score != null) parts.push(`Score: ${bestReplay.score}`);
+            const statsStr = parts.length > 0 ? ` (${parts.join(', ')})` : '';
+            replayOpt.textContent = `▶ Watch Best Game${statsStr}`;
+            replayOpt.style.fontWeight = 'bold';
+            this.checkpointSelect.appendChild(replayOpt);
+        }
 
         if (!Array.isArray(checkpoints) || checkpoints.length === 0) return;
 
@@ -395,7 +414,7 @@ class GameController {
             peakCheckpoints.forEach(cp => {
                 const opt = document.createElement('option');
                 opt.value = cp.value;
-                opt.textContent = `★ ${cp.algo} Peak (Avg Length: 63, Max: 79)`;
+                opt.textContent = `★ ${cp.algo} Peak Best`;
                 opt.style.fontWeight = 'bold';
                 this.checkpointSelect.appendChild(opt);
             });
@@ -626,24 +645,23 @@ class GameController {
             this.currentScore = 0;
             this.updateScoreDisplay(0);
             
-            // Get playback speed
-            const speed = parseFloat(this.gameSpeedSelect.value) || 0.15;
-            
             // Play through frames
             this._replayActive = true;
             for (let i = 0; i < frames.length; i++) {
                 if (!this._replayActive) break;
-                
+
                 const frame = frames[i];
                 this.renderState(frame);
                 this.currentScore = frame.score || 0;
                 this.updateScoreDisplay(this.currentScore);
-                
+
                 // Update progress in metadata
                 const snakeLen = frame.snake ? frame.snake.length : 0;
                 const pct = Math.round((i / frames.length) * 100);
                 this.checkpointMeta.textContent = `Snake: ${snakeLen} • Score: ${frame.score || 0} • Frame ${i+1}/${frames.length} (${pct}%)`;
-                
+
+                // Read speed live so user can change it mid-replay
+                const speed = parseFloat(this.gameSpeedSelect.value) || 0.15;
                 await new Promise(resolve => setTimeout(resolve, speed * 1000));
             }
             
@@ -1086,12 +1104,13 @@ class GameController {
         
         // Restore previous mode and checkpoint if it was agent mode
         if (this.lastMode === 'agent') {
-            this.setMode('agent');
+            // Set value before setMode so fetchCheckpoints preserves it
             if (this.lastCheckpoint) {
                 this.checkpointSelect.value = this.lastCheckpoint;
             }
+            this.setMode('agent');
         }
-        
+
         this.startGame();
     }
 

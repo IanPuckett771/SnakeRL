@@ -40,9 +40,24 @@ async def serve_index():
 
 @app.get("/checkpoints")
 async def get_checkpoints():
-    """Return list of available checkpoints."""
+    """Return list of available checkpoints and best-replay availability."""
     checkpoints = AgentInterface.list_checkpoints(str(CHECKPOINTS_DIR))
-    return {"checkpoints": checkpoints}
+    result = {"checkpoints": checkpoints}
+
+    # Include best-replay info if it exists
+    replay_file = CHECKPOINTS_DIR / "best_replay.json"
+    if replay_file.exists():
+        try:
+            with open(replay_file, "r") as f:
+                data = json.load(f)
+            result["best_replay"] = {
+                "score": data.get("score"),
+                "length": data.get("snake_length"),
+            }
+        except Exception:
+            pass
+
+    return result
 
 
 @app.get("/checkpoint-info/{checkpoint_name}")
@@ -171,7 +186,7 @@ class GameSession:
         self.running: bool = False
 
 
-async def run_play_loop(websocket: WebSocket, session: GameSession, tick_rate: float = 0.15):
+async def run_play_loop(websocket: WebSocket, session: GameSession):
     """Run the game loop for play mode - snake moves automatically."""
     session.running = True
     try:
@@ -197,7 +212,7 @@ async def run_play_loop(websocket: WebSocket, session: GameSession, tick_rate: f
                 })
                 break
 
-            await asyncio.sleep(tick_rate)
+            await asyncio.sleep(session.speed)
     except Exception as e:
         print(f"Game loop error: {e}")
     finally:
@@ -254,14 +269,16 @@ async def websocket_game(websocket: WebSocket):
                         checkpoint_path = CHECKPOINTS_DIR / checkpoint
                         agent.load_checkpoint(str(checkpoint_path))
                     session.game_task = asyncio.create_task(
-                        run_agent_loop(websocket, session.game, agent, session.snake_color,
-                                       delay=session.speed)
+                        run_agent_loop(websocket, session.game, agent, session)
                     )
                 else:
                     # Play mode - start auto-move loop
                     session.game_task = asyncio.create_task(
-                        run_play_loop(websocket, session, session.speed)
+                        run_play_loop(websocket, session)
                     )
+
+            elif msg_type == "set_speed":
+                session.speed = message.get("speed", 0.15)
 
             elif msg_type == "action" and session.game and session.mode == "play":
                 # Queue the action for the next tick
@@ -288,7 +305,7 @@ async def websocket_game(websocket: WebSocket):
                 # Restart game loop
                 if session.mode == "play":
                     session.game_task = asyncio.create_task(
-                        run_play_loop(websocket, session, session.speed)
+                        run_play_loop(websocket, session)
                     )
 
     except WebSocketDisconnect:
@@ -308,8 +325,7 @@ async def run_agent_loop(
     websocket: WebSocket,
     game: SnakeGame,
     agent: AgentInterface,
-    snake_color: str,
-    delay: float = 0.3,  # Default playback speed (overridden by user's speed setting)
+    session: GameSession,
 ):
     """Run the agent loop, sending state updates with delay.
 
@@ -317,8 +333,7 @@ async def run_agent_loop(
         websocket: WebSocket connection
         game: SnakeGame instance
         agent: AgentInterface instance
-        snake_color: Color for the snake
-        delay: Delay between moves in seconds
+        session: GameSession (reads speed dynamically)
     """
     try:
         while not game.game_over:
@@ -335,7 +350,7 @@ async def run_agent_loop(
                 "state": state.to_dict(),
                 "reward": reward,
                 "action": action,
-                "snake_color": snake_color,
+                "snake_color": session.snake_color,
             })
 
             if done:
@@ -346,8 +361,8 @@ async def run_agent_loop(
                 })
                 break
 
-            # Delay between moves
-            await asyncio.sleep(delay)
+            # Delay between moves (reads session.speed live)
+            await asyncio.sleep(session.speed)
 
     except WebSocketDisconnect:
         pass
