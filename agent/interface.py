@@ -15,22 +15,24 @@ from game.state import GameState
 
 
 if TORCH_AVAILABLE:
+    # Legacy FC network for old checkpoints (matches DQNNetwork in algorithms/dqn.py)
     class SimpleDQN(nn.Module):
-        """Simple Deep Q-Network for Snake."""
-        
+        """Simple Deep Q-Network for Snake (legacy flat vector)."""
+
         def __init__(self, state_size=24, action_size=4, hidden_size=256):
             super(SimpleDQN, self).__init__()
             self.fc1 = nn.Linear(state_size, hidden_size)
             self.fc2 = nn.Linear(hidden_size, hidden_size)
-            self.fc3 = nn.Linear(hidden_size, action_size)
+            self.fc3 = nn.Linear(hidden_size, 128)
+            self.fc4 = nn.Linear(128, action_size)
             self.relu = nn.ReLU()
-            
+
         def forward(self, x):
             x = self.relu(self.fc1(x))
             x = self.relu(self.fc2(x))
-            return self.fc3(x)
+            x = self.relu(self.fc3(x))
+            return self.fc4(x)
 else:
-    # Dummy class if torch not available
     class SimpleDQN:
         pass
 
@@ -45,10 +47,11 @@ class AgentInterface:
         """Initialize the agent interface."""
         self.checkpoint_path: Optional[str] = None
         self.model = None
+        self.model_type = None  # 'cnn' or 'legacy'
         self.device = torch.device("cuda" if TORCH_AVAILABLE and torch.cuda.is_available() else "cpu") if TORCH_AVAILABLE else None
 
     def load_checkpoint(self, path: str) -> bool:
-        """Load a model checkpoint.
+        """Load a model checkpoint (CNN or legacy FC).
 
         Args:
             path: Path to the checkpoint file
@@ -58,45 +61,58 @@ class AgentInterface:
         """
         if not TORCH_AVAILABLE:
             return False
-            
+
         if os.path.exists(path):
             try:
                 checkpoint = torch.load(path, map_location=self.device)
-                self.model = SimpleDQN(state_size=24, action_size=4).to(self.device)
-                if 'model_state_dict' in checkpoint:
-                    self.model.load_state_dict(checkpoint['model_state_dict'])
+
+                if isinstance(checkpoint, dict) and checkpoint.get('model_type') == 'cnn':
+                    # CNN checkpoint — detect architecture from state_dict keys
+                    from algorithms.networks import DQNCNNNetwork, A2CCNNNetwork, PPOCNNNetwork
+                    state_dict = checkpoint['model_state_dict']
+                    has_head = any(k.startswith('head.') for k in state_dict)
+                    if has_head:
+                        # DQN: encoder + head
+                        self.model = DQNCNNNetwork(num_channels=7, action_size=4).to(self.device)
+                    else:
+                        # A2C/PPO: encoder + shared + actor + critic (same arch)
+                        self.model = A2CCNNNetwork(num_channels=7, action_size=4).to(self.device)
+                    self.model.load_state_dict(state_dict)
+                    self.model_type = 'cnn'
                 else:
-                    # Old format - direct model save
-                    self.model = checkpoint
-                self.model.eval()  # Set to evaluation mode
+                    # Legacy flat checkpoint
+                    self.model = SimpleDQN(state_size=24, action_size=4).to(self.device)
+                    if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+                        self.model.load_state_dict(checkpoint['model_state_dict'])
+                    else:
+                        self.model = checkpoint
+                    self.model_type = 'legacy'
+
+                self.model.eval()
                 self.checkpoint_path = path
                 return True
             except Exception as e:
                 print(f"Error loading checkpoint: {e}")
                 return False
         return False
-    
-    def _encode_state(self, state: GameState) -> np.ndarray:
-        """Encode game state into a feature vector for the neural network."""
+
+    def _encode_state_legacy(self, state: GameState) -> np.ndarray:
+        """Encode game state into a flat feature vector (legacy)."""
         head_x, head_y = state.snake[0]
         food_x, food_y = state.food
-        
-        # Normalize positions to [0, 1]
+
         width, height = state.width, state.height
-        
-        # Direction one-hot encoding
+
         direction_map = {"up": 0, "down": 1, "left": 2, "right": 3}
         direction_idx = direction_map.get(state.direction, 0)
         direction_onehot = [0.0] * 4
         direction_onehot[direction_idx] = 1.0
-        
-        # Calculate danger in 4 directions (up, down, left, right)
+
         dangers = []
-        directions = [(0, -1), (0, 1), (-1, 0), (1, 0)]  # up, down, left, right
-        
+        directions = [(0, -1), (0, 1), (-1, 0), (1, 0)]
+
         for dx, dy in directions:
             next_x, next_y = head_x + dx, head_y + dy
-            # Check if next position is dangerous
             is_danger = (
                 next_x < 0 or next_x >= width or
                 next_y < 0 or next_y >= height or
@@ -104,21 +120,19 @@ class AgentInterface:
                 (next_x, next_y) in state.snake[:-1]
             )
             dangers.append(1.0 if is_danger else 0.0)
-        
-        # Distance to food (normalized)
+
         food_dx = (food_x - head_x) / width if width > 0 else 0
         food_dy = (food_y - head_y) / height if height > 0 else 0
-        
-        # Combine all features
+
         features = [
-            head_x / width if width > 0 else 0,  # Normalized head x
-            head_y / height if height > 0 else 0,  # Normalized head y
-            food_dx,  # Normalized food dx
-            food_dy,  # Normalized food dy
-            *direction_onehot,  # Direction encoding
-            *dangers,  # Danger in 4 directions
+            head_x / width if width > 0 else 0,
+            head_y / height if height > 0 else 0,
+            food_dx,
+            food_dy,
+            *direction_onehot,
+            *dangers,
         ]
-        
+
         return np.array(features, dtype=np.float32)
 
     def get_action(self, state: GameState) -> str:
@@ -132,30 +146,37 @@ class AgentInterface:
         """
         if state.game_over:
             return random.choice(self.ACTIONS)
-        
+
         # Use trained model if available
         if self.model is not None and TORCH_AVAILABLE:
             try:
-                state_encoded = self._encode_state(state)
-                state_tensor = torch.FloatTensor(state_encoded).unsqueeze(0).to(self.device)
+                if self.model_type == 'cnn':
+                    from algorithms.base import encode_state_grid
+                    grid = encode_state_grid(state)
+                    state_tensor = torch.FloatTensor(grid).unsqueeze(0).to(self.device)
+                else:
+                    state_encoded = self._encode_state_legacy(state)
+                    state_tensor = torch.FloatTensor(state_encoded).unsqueeze(0).to(self.device)
+
                 with torch.no_grad():
-                    q_values = self.model(state_tensor)
-                    action_idx = q_values.cpu().data.numpy().argmax()
+                    output = self.model(state_tensor)
+                    # Handle both DQN (returns Q-values) and actor-critic (returns probs, value)
+                    if isinstance(output, tuple):
+                        action_probs = output[0]
+                        action_idx = action_probs.cpu().data.numpy().argmax()
+                    else:
+                        action_idx = output.cpu().data.numpy().argmax()
                     return self.ACTIONS[action_idx]
             except Exception as e:
-                # Fall back to heuristic if model fails
                 print(f"Model inference error: {e}, using heuristic")
-                pass
-        
-        # Simple heuristic: try to move towards food, avoid walls and self
+
+        # Simple heuristic fallback
         head_x, head_y = state.snake[0]
         food_x, food_y = state.food
-        
-        # Calculate direction to food
+
         dx = food_x - head_x
         dy = food_y - head_y
-        
-        # Get valid actions (avoid reversing direction)
+
         valid_actions = []
         opposite = {
             "up": "down",
@@ -163,38 +184,31 @@ class AgentInterface:
             "left": "right",
             "right": "left"
         }
-        
+
         for action in self.ACTIONS:
-            # Don't reverse direction
             if state.direction and action == opposite.get(state.direction):
                 continue
             valid_actions.append(action)
-        
+
         if not valid_actions:
             return random.choice(self.ACTIONS)
-        
-        # Prefer actions that move towards food
+
         preferred_actions = []
         if abs(dx) > abs(dy):
-            # Prefer horizontal movement
             if dx > 0:
                 preferred_actions.append("right")
             elif dx < 0:
                 preferred_actions.append("left")
         else:
-            # Prefer vertical movement
             if dy > 0:
                 preferred_actions.append("down")
             elif dy < 0:
                 preferred_actions.append("up")
-        
-        # Filter preferred actions to only valid ones
+
         preferred_valid = [a for a in preferred_actions if a in valid_actions]
-        
-        # Check if preferred action would cause collision
+
         safe_actions = []
         for action in (preferred_valid if preferred_valid else valid_actions):
-            # Calculate next position
             direction_map = {
                 "up": (0, -1),
                 "down": (0, 1),
@@ -203,24 +217,20 @@ class AgentInterface:
             }
             dx_move, dy_move = direction_map[action]
             next_pos = (head_x + dx_move, head_y + dy_move)
-            
-            # Check if next position is safe (not a wall, not snake body, within bounds)
-            if (next_pos not in state.walls and 
+
+            if (next_pos not in state.walls and
                 next_pos not in state.snake[:-1] and
                 0 <= next_pos[0] < state.width and
                 0 <= next_pos[1] < state.height):
                 safe_actions.append(action)
-        
-        # Choose from safe actions, or fall back to random
+
         if safe_actions:
-            # 80% chance to choose preferred safe action, 20% random safe action
             if preferred_valid and random.random() < 0.8:
                 preferred_safe = [a for a in preferred_valid if a in safe_actions]
                 if preferred_safe:
                     return random.choice(preferred_safe)
             return random.choice(safe_actions)
-        
-        # If no safe actions, return random (will likely cause game over)
+
         return random.choice(valid_actions)
 
     @classmethod

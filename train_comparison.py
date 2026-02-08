@@ -302,7 +302,7 @@ def main():
                 epsilon=1.0,  # Start with full exploration
                 epsilon_min=0.05,  # Keep some exploration
                 epsilon_decay=0.9995,  # Slow decay for 30 min training
-                memory_size=50000,  # Larger memory for more experience
+                memory_size=10000,  # Capped for CNN grid memory (~112MB)
                 batch_size=128  # Larger batches for more stable learning
             )
             
