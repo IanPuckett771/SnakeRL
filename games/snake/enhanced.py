@@ -9,6 +9,7 @@ from typing import Any
 
 import numpy as np
 
+import config
 from games.base import BaseGameEnv, GameMetadata
 from games.registry import GameRegistry
 
@@ -304,7 +305,7 @@ class EnhancedSnakeEnv(BaseGameEnv):
         - Channel 4: Speed/Shrink food
         - Channel 5: Obstacles
         """
-        obs = np.zeros((6, self.height, self.width), dtype=np.float32)
+        obs = np.zeros((6, self.height, self.width), dtype=config.OBSERVATION_DTYPE)
 
         # Snake body (excluding head)
         for x, y in self.snake[1:]:

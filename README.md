@@ -137,6 +137,15 @@ SnakeRL/
 
 Train a DQN (Deep Q-Network) agent to play Snake using the provided training script.
 
+### Performance Optimization
+
+SnakeRL supports configurable bit precision for observations to speed up training. Edit `config.py` to change:
+
+```python
+# Options: np.float32 (baseline), np.float16 (recommended), np.uint8
+OBSERVATION_DTYPE = np.float16  # 50% memory reduction, faster on GPU
+```
+
 ### Prerequisites
 
 1. Install dependencies (includes PyTorch and Weights & Biases):

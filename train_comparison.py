@@ -10,17 +10,22 @@ from pathlib import Path
 import wandb
 
 from game.engine import SnakeGame
-from algorithms import DQNAgent, PPOAgent, A2CAgent
+from algorithms import DQNAgent, DQNCNNAgent, PPOAgent, A2CAgent
 
 
 NUM_PARALLEL_GAMES = 8  # Run this many games simultaneously for faster training
+NUM_PARALLEL_GAMES_CNN = 2  # Fewer for CNN (more compute per step)
 
 
 def train_algorithm(agent, algorithm_name, duration_seconds=60, use_wandb=True, 
                    project_name="snakerl-comparison", run_id=None):
     """Train a single algorithm with parallel game environments."""
+    # Use fewer parallel envs for CNN (more compute per step)
+    is_cnn = hasattr(agent, 'board_width')  # CNN agent has board_width attribute
+    num_envs = NUM_PARALLEL_GAMES_CNN if is_cnn else NUM_PARALLEL_GAMES
+    
     print(f"\n{'='*60}")
-    print(f"Training {algorithm_name} ({NUM_PARALLEL_GAMES} parallel envs)")
+    print(f"Training {algorithm_name} ({num_envs} parallel envs{' [CNN]' if is_cnn else ''})")
     print(f"{'='*60}\n")
     
     # Generate unique run ID if not provided
@@ -42,7 +47,7 @@ def train_algorithm(agent, algorithm_name, duration_seconds=60, use_wandb=True,
                 config={
                     "algorithm": algorithm_name,
                     "duration_seconds": duration_seconds,
-                    "parallel_envs": NUM_PARALLEL_GAMES,
+                    "parallel_envs": num_envs,
                 },
                 reinit=True,
                 settings=wandb.Settings(init_timeout=30)
@@ -69,10 +74,10 @@ def train_algorithm(agent, algorithm_name, duration_seconds=60, use_wandb=True,
             }, f)
         
         # Create parallel game environments
-        games = [SnakeGame(width=20, height=20) for _ in range(NUM_PARALLEL_GAMES)]
+        games = [SnakeGame(width=20, height=20) for _ in range(num_envs)]
         states = [g.reset() for g in games]
-        game_rewards = [0.0] * NUM_PARALLEL_GAMES
-        game_steps = [0] * NUM_PARALLEL_GAMES
+        game_rewards = [0.0] * num_envs
+        game_steps = [0] * num_envs
         
         episode = 0
         scores = []
@@ -91,7 +96,9 @@ def train_algorithm(agent, algorithm_name, duration_seconds=60, use_wandb=True,
         
         from datetime import datetime
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        checkpoint_prefix = f"{algorithm_name.lower()}_agent_{timestamp}"
+        # Use the agent's algorithm_name for prefix (e.g. "dqn" or "dqn-cnn")
+        prefix_name = agent.algorithm_name.lower().replace("-", "_")
+        checkpoint_prefix = f"{prefix_name}_agent_{timestamp}"
         print(f"Checkpoint prefix: {checkpoint_prefix}")
         print(f"Checkpoints will be saved as: {checkpoint_prefix}_stage##.pt\n")
         
@@ -102,7 +109,7 @@ def train_algorithm(agent, algorithm_name, duration_seconds=60, use_wandb=True,
         # Training loop - step all games each iteration
         while time.time() - start_time < duration_seconds:
             # Step all parallel games
-            for i in range(NUM_PARALLEL_GAMES):
+            for i in range(num_envs):
                 if games[i].game_over:
                     # Episode finished - record stats and reset
                     episode += 1
@@ -230,7 +237,7 @@ def train_algorithm(agent, algorithm_name, duration_seconds=60, use_wandb=True,
         final_checkpoint_path = checkpoint_dir / f"{checkpoint_prefix}_stage{num_stages:02d}.pt"
         agent.save_checkpoint(str(final_checkpoint_path))
         # Also save as the main checkpoint for backward compatibility (overwrites previous)
-        main_checkpoint_path = checkpoint_dir / f"{algorithm_name.lower()}_agent.pt"
+        main_checkpoint_path = checkpoint_dir / f"{prefix_name}_agent.pt"
         agent.save_checkpoint(str(main_checkpoint_path))
         
         # Final statistics
@@ -290,6 +297,8 @@ def main():
                        help="Which algorithms to train (default: all)")
     parser.add_argument("--fresh", action="store_true",
                        help="Start fresh instead of resuming from previous checkpoint")
+    parser.add_argument("--cnn", action="store_true",
+                       help="Use CNN-based DQN (sees entire board) instead of flat features")
     
     args = parser.parse_args()
     
@@ -299,10 +308,13 @@ def main():
     else:
         algorithms_to_train = args.algorithms
     
+    model_type = "CNN" if args.cnn else "Flat"
+    
     print(f"\n{'='*60}")
     print(f"SnakeRL Algorithm Comparison")
     print(f"{'='*60}")
     print(f"Algorithms: {', '.join(algorithms_to_train)}")
+    print(f"Model type: {model_type}")
     print(f"Duration per algorithm: {args.duration} seconds")
     print(f"Wandb: {'Disabled' if args.no_wandb else f'Enabled (project: {args.project})'}")
     print(f"Resume from checkpoint: {'No (fresh start)' if args.fresh else 'Yes (if available)'}")
@@ -315,20 +327,35 @@ def main():
     for alg_name in algorithms_to_train:
         # Create agent with improved settings for better learning
         if alg_name == "DQN":
-            agent = DQNAgent(
-                lr=0.0005,  # Slightly lower LR for fine-tuning (was 0.001)
-                gamma=0.99,  # High discount for long-term planning
-                epsilon=1.0,  # Start with full exploration (overwritten by checkpoint)
-                epsilon_min=0.05,  # Keep some exploration
-                epsilon_decay=0.9995,  # Slow decay
-                memory_size=100000,  # Much larger memory for diverse experiences
-                batch_size=256  # Larger batches for more stable gradients
-            )
+            if args.cnn:
+                # CNN-based DQN — sees the entire board as a 7-channel grid
+                agent = DQNCNNAgent(
+                    lr=0.0005,
+                    gamma=0.99,
+                    epsilon=1.0,
+                    epsilon_min=0.05,
+                    epsilon_decay=0.9995,
+                    memory_size=50000,  # Smaller than flat (grids use more memory)
+                    batch_size=64,      # Smaller batches (CNN is more compute-heavy)
+                )
+                checkpoint_name = "dqn_cnn_agent.pt"
+                print(f"[CNN] Using DQN-CNN agent (7-channel grid input, full board vision)")
+            else:
+                # Flat feature vector DQN
+                agent = DQNAgent(
+                    lr=0.0005,
+                    gamma=0.99,
+                    epsilon=1.0,
+                    epsilon_min=0.05,
+                    epsilon_decay=0.9995,
+                    memory_size=100000,
+                    batch_size=256,
+                )
+                checkpoint_name = "dqn_agent.pt"
             
             # Try to load from previous checkpoint unless --fresh is specified
             if not args.fresh:
-                # Look for the main checkpoint or most recent stage
-                main_checkpoint = checkpoint_dir / f"{alg_name.lower()}_agent.pt"
+                main_checkpoint = checkpoint_dir / checkpoint_name
                 if main_checkpoint.exists():
                     print(f"[RESUME] Found previous checkpoint: {main_checkpoint.name}")
                     agent.load_checkpoint(str(main_checkpoint))

@@ -6,6 +6,7 @@ from typing import Any
 
 import numpy as np
 
+import config
 from game.engine import SnakeGame
 from games.base import BaseGameEnv, GameMetadata
 from games.registry import GameRegistry
@@ -28,7 +29,7 @@ class SnakeEnv(BaseGameEnv):
         self._max_steps = width * height * 10  # Reasonable limit
 
         # Pre-allocate observation buffer to avoid repeated allocation
-        self._obs_buffer = np.zeros((3, height, width), dtype=np.float32)
+        self._obs_buffer = np.zeros((3, height, width), dtype=config.OBSERVATION_DTYPE)
 
         # Observation: 3 channels (snake body, snake head, food)
         self.metadata = GameMetadata(
@@ -82,7 +83,7 @@ class SnakeEnv(BaseGameEnv):
         new_env._step_count = self._step_count
         new_env._max_steps = self._max_steps
         # Pre-allocate new buffer for the cloned env
-        new_env._obs_buffer = np.zeros((3, self.height, self.width), dtype=np.float32)
+        new_env._obs_buffer = np.zeros((3, self.height, self.width), dtype=config.OBSERVATION_DTYPE)
         new_env.metadata = self.metadata  # Shared reference is fine (immutable)
         return new_env
 

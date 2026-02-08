@@ -7,6 +7,8 @@ from collections.abc import Generator
 import numpy as np
 import torch
 
+import config
+
 # Try to import numba for JIT-compiled GAE
 try:
     from numba import njit
@@ -88,7 +90,7 @@ class RolloutBuffer:
 
     def reset(self) -> None:
         """Reset the buffer."""
-        self.observations = np.zeros((self.buffer_size, *self.observation_shape), dtype=np.float32)
+        self.observations = np.zeros((self.buffer_size, *self.observation_shape), dtype=config.OBSERVATION_DTYPE)
         self.actions = np.zeros(self.buffer_size, dtype=np.int64)
         self.rewards = np.zeros(self.buffer_size, dtype=np.float32)
         self.dones = np.zeros(self.buffer_size, dtype=np.float32)
@@ -200,8 +202,11 @@ class RolloutBuffer:
             end = start + batch_size
             batch_indices = indices[start:end]
 
+            # Convert observations to float32 for training
+            observations_f32 = self.observations[batch_indices].astype(np.float32)
+
             yield {
-                "observations": torch.FloatTensor(self.observations[batch_indices]).to(self.device),
+                "observations": torch.FloatTensor(observations_f32).to(self.device),
                 "actions": torch.LongTensor(self.actions[batch_indices]).to(self.device),
                 "old_log_probs": torch.FloatTensor(self.log_probs[batch_indices]).to(self.device),
                 "advantages": torch.FloatTensor(advantages[batch_indices]).to(self.device),

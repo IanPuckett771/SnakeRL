@@ -6,6 +6,7 @@ from typing import Any
 
 import numpy as np
 
+import config
 from game.tank_state import TankState
 from games.base import BaseGameEnv, GameMetadata
 from games.registry import GameRegistry
@@ -116,7 +117,7 @@ class TankEnv(BaseGameEnv):
         - Channel 3: Bullets (1 at each bullet position)
         - Channel 4: Collectibles (1 at each collectible position)
         """
-        obs = np.zeros((5, self.height, self.width), dtype=np.float32)
+        obs = np.zeros((5, self.height, self.width), dtype=config.OBSERVATION_DTYPE)
 
         # Channel 0: Walls (now Wall objects with x, y, width, height)
         for wall in self._state.walls:

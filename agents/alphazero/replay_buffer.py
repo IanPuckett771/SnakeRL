@@ -79,9 +79,10 @@ class GameReplayBuffer:
             target_policies.append(game.policies[step_idx])
             target_values.append(game.outcome)
 
+        # Convert observations to float32 for training (may be stored as float16)
         return {
-            "observations": torch.FloatTensor(np.array(observations)).to(device),
-            "target_policies": torch.FloatTensor(np.array(target_policies)).to(device),
+            "observations": torch.FloatTensor(np.array(observations, dtype=np.float32)).to(device),
+            "target_policies": torch.FloatTensor(np.array(target_policies, dtype=np.float32)).to(device),
             "target_values": torch.FloatTensor(target_values).to(device),
         }
 

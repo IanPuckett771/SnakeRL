@@ -6,6 +6,7 @@ from typing import Any, Protocol
 
 import numpy as np
 
+import config
 from game.tron_state import Direction, TronState
 from games.base import BaseGameEnv, GameMetadata
 from games.registry import GameRegistry
@@ -189,7 +190,7 @@ class TronEnv(BaseGameEnv):
         Args:
             player_perspective: 1 for player 1's view, 2 for player 2's view
         """
-        obs = np.zeros((4, self.height, self.width), dtype=np.float32)
+        obs = np.zeros((4, self.height, self.width), dtype=config.OBSERVATION_DTYPE)
 
         p1 = self._state.player1
         p2 = self._state.player2
