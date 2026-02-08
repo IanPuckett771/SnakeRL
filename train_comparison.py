@@ -14,12 +14,19 @@ from algorithms import DQNAgent, DQNCNNAgent, PPOAgent, A2CAgent
 
 
 NUM_PARALLEL_GAMES = 8  # Run this many games simultaneously for faster training
-NUM_PARALLEL_GAMES_CNN = 2  # Fewer for CNN (more compute per step)
+NUM_PARALLEL_GAMES_CNN = 8  # Lightweight CNN runs at similar speed to flat MLP
 
 
-def train_algorithm(agent, algorithm_name, duration_seconds=60, use_wandb=True, 
-                   project_name="snakerl-comparison", run_id=None):
-    """Train a single algorithm with parallel game environments."""
+def train_algorithm(agent, algorithm_name, duration_seconds=60, use_wandb=True,
+                   project_name="snakerl-comparison", run_id=None,
+                   early_stop_patience=200, early_stop_min_episodes=100):
+    """Train a single algorithm with parallel game environments.
+
+    Args:
+        early_stop_patience: Stop if best avg score hasn't improved in this many episodes.
+                             Set to 0 to disable early stopping.
+        early_stop_min_episodes: Minimum episodes before early stopping can trigger.
+    """
     # Use fewer parallel envs for CNN (more compute per step)
     is_cnn = hasattr(agent, 'board_width')  # CNN agent has board_width attribute
     num_envs = NUM_PARALLEL_GAMES_CNN if is_cnn else NUM_PARALLEL_GAMES
@@ -105,9 +112,14 @@ def train_algorithm(agent, algorithm_name, duration_seconds=60, use_wandb=True,
         total_steps = 0
         log_interval = 10  # Log every N completed episodes
         last_logged_episode = 0  # Track to avoid duplicate logging
+
+        # Early stopping state
+        best_avg_score = float('-inf')
+        best_avg_episode = 0  # Episode at which best_avg_score was set
+        early_stopped = False
         
         # Training loop - step all games each iteration
-        while time.time() - start_time < duration_seconds:
+        while time.time() - start_time < duration_seconds and not early_stopped:
             # Step all parallel games
             for i in range(num_envs):
                 if games[i].game_over:
@@ -198,6 +210,19 @@ def train_algorithm(agent, algorithm_name, duration_seconds=60, use_wandb=True,
                     last_checkpoint_time = time.time()
                     print(f"  -> Saved checkpoint stage {stage}/{num_stages}: {checkpoint_path.name} (Avg Score: {avg_score:.2f})")
                 
+                # Early stopping check — compare rolling avg over last 50 episodes
+                if early_stop_patience > 0 and episode >= early_stop_min_episodes:
+                    window = min(50, len(scores))
+                    rolling_avg = np.mean(scores[-window:])
+                    if rolling_avg > best_avg_score:
+                        best_avg_score = rolling_avg
+                        best_avg_episode = episode
+                    elif episode - best_avg_episode >= early_stop_patience:
+                        early_stopped = True
+                        print(f"\n[EARLY STOP] No improvement in avg score for "
+                              f"{early_stop_patience} episodes (best: {best_avg_score:.2f} "
+                              f"at ep {best_avg_episode})")
+
                 # Log to wandb
                 if use_wandb:
                     log_dict = {
@@ -222,9 +247,9 @@ def train_algorithm(agent, algorithm_name, duration_seconds=60, use_wandb=True,
                         log_dict["loss"] = avg_loss
                     if algorithm_name == "DQN":
                         log_dict["epsilon"] = agent.epsilon
-                    
+
                     wandb.log(log_dict)
-                
+
                 print(f"Ep {episode:5d} | Score: {scores[-1]:3d} | "
                       f"Avg(10): {avg_score:6.2f} | "
                       f"SnakeLen: {avg_snake_length:5.1f} | "
@@ -232,6 +257,9 @@ def train_algorithm(agent, algorithm_name, duration_seconds=60, use_wandb=True,
                       f"Steps: {total_steps:>8d} | "
                       f"Left: {remaining:5.0f}s | "
                       f"Stage: {stage}/{num_stages}")
+
+                if early_stopped:
+                    break
         
         # Save final checkpoint (stage 10 or final)
         final_checkpoint_path = checkpoint_dir / f"{checkpoint_prefix}_stage{num_stages:02d}.pt"
@@ -244,11 +272,14 @@ def train_algorithm(agent, algorithm_name, duration_seconds=60, use_wandb=True,
         final_avg_score = np.mean(scores[-50:]) if len(scores) >= 50 else np.mean(scores) if scores else 0
         final_avg_reward = np.mean(episode_rewards[-50:]) if len(episode_rewards) >= 50 else np.mean(episode_rewards) if episode_rewards else 0
         
+        stop_reason = "early stopping (plateau)" if early_stopped else "duration limit"
         print(f"\n{'-'*60}")
-        print(f"Training complete for {algorithm_name}!")
+        print(f"Training complete for {algorithm_name}! ({stop_reason})")
         print(f"Episodes: {episode}")
         print(f"Final average score: {final_avg_score:.2f}")
         print(f"Final average reward: {final_avg_reward:.2f}")
+        if early_stopped:
+            print(f"Best avg score: {best_avg_score:.2f} at episode {best_avg_episode}")
         print(f"Checkpoints saved:")
         print(f"  - Final: {final_checkpoint_path.name}")
         print(f"  - Main: {main_checkpoint_path.name}")
@@ -261,6 +292,7 @@ def train_algorithm(agent, algorithm_name, duration_seconds=60, use_wandb=True,
                 "final_avg_score": final_avg_score,
                 "final_avg_reward": final_avg_reward,
                 "total_episodes": episode,
+                "early_stopped": early_stopped,
             })
             wandb.finish()
             print(f"[OK] Wandb run completed: {run.url}")
@@ -299,7 +331,11 @@ def main():
                        help="Start fresh instead of resuming from previous checkpoint")
     parser.add_argument("--cnn", action="store_true",
                        help="Use CNN-based DQN (sees entire board) instead of flat features")
-    
+    parser.add_argument("--early-stop-patience", type=int, default=200,
+                       help="Stop if no improvement in this many episodes (0 to disable, default: 200)")
+    parser.add_argument("--early-stop-min-episodes", type=int, default=100,
+                       help="Minimum episodes before early stopping can trigger (default: 100)")
+
     args = parser.parse_args()
     
     # Determine which algorithms to train
@@ -318,6 +354,10 @@ def main():
     print(f"Duration per algorithm: {args.duration} seconds")
     print(f"Wandb: {'Disabled' if args.no_wandb else f'Enabled (project: {args.project})'}")
     print(f"Resume from checkpoint: {'No (fresh start)' if args.fresh else 'Yes (if available)'}")
+    if args.early_stop_patience > 0:
+        print(f"Early stopping: after {args.early_stop_patience} episodes with no improvement (min {args.early_stop_min_episodes} episodes)")
+    else:
+        print(f"Early stopping: disabled")
     print(f"{'='*60}\n")
     
     results = []
@@ -335,11 +375,11 @@ def main():
                     epsilon=1.0,
                     epsilon_min=0.05,
                     epsilon_decay=0.9995,
-                    memory_size=50000,  # Smaller than flat (grids use more memory)
-                    batch_size=64,      # Smaller batches (CNN is more compute-heavy)
+                    memory_size=100000,
+                    batch_size=256,
                 )
                 checkpoint_name = "dqn_cnn_agent.pt"
-                print(f"[CNN] Using DQN-CNN agent (7-channel grid input, full board vision)")
+                print(f"[CNN] Using lightweight DQN-CNN agent (~105K params, full board vision)")
             else:
                 # Flat feature vector DQN
                 agent = DQNAgent(
@@ -371,11 +411,13 @@ def main():
         
         # Train
         result = train_algorithm(
-            agent, 
-            alg_name, 
+            agent,
+            alg_name,
             duration_seconds=args.duration,
             use_wandb=not args.no_wandb,
-            project_name=args.project
+            project_name=args.project,
+            early_stop_patience=args.early_stop_patience,
+            early_stop_min_episodes=args.early_stop_min_episodes,
         )
         results.append(result)
     
