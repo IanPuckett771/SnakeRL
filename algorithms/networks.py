@@ -38,7 +38,7 @@ class CNNEncoder(nn.Module):
     def forward(self, x):
         x = self.conv(x)
         x = self.pool(x)
-        return x.view(x.size(0), -1)
+        return x.reshape(x.size(0), -1)  # reshape instead of view for channels_last compat
 
 
 class DQNCNNNetwork(nn.Module):

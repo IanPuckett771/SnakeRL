@@ -118,60 +118,86 @@ def train_algorithm(agent, algorithm_name, duration_seconds=60, use_wandb=True,
         best_avg_episode = 0  # Episode at which best_avg_score was set
         early_stopped = False
         
+        # Check if agent supports batched actions (CNN DQN)
+        use_batched = is_cnn and algorithm_name == "DQN" and hasattr(agent, 'batch_get_actions')
+
         # Training loop - step all games each iteration
         while time.time() - start_time < duration_seconds and not early_stopped:
-            # Step all parallel games
+            # Phase 1: Handle completed games (reset before stepping)
             for i in range(num_envs):
                 if games[i].game_over:
-                    # Episode finished - record stats and reset
                     episode += 1
                     agent.episode = episode
                     snake_length = len(games[i].snake)
-                    
+
                     scores.append(games[i].score)
                     episode_rewards.append(game_rewards[i])
                     episode_lengths.append(game_steps[i])
                     snake_lengths.append(snake_length)
-                    
-                    # Reset this game
+
                     states[i] = games[i].reset()
                     game_rewards[i] = 0.0
                     game_steps[i] = 0
-                    continue
-                
-                old_state = states[i]
-                action = agent.get_action(old_state, training=True)
-                
-                new_state, reward, done = games[i].step(action)
-                game_rewards[i] += reward
-                game_steps[i] += 1
-                total_steps += 1
-                
-                if algorithm_name == "DQN":
-                    agent.remember(old_state, action, reward, new_state, done)
+
+            # Phase 2: Step all envs
+            if use_batched:
+                # Batched forward pass: one model call for all envs
+                actions, grids = agent.batch_get_actions(states, training=True)
+                for i in range(num_envs):
+                    new_state, reward, done = games[i].step(actions[i])
+                    game_rewards[i] += reward
+                    game_steps[i] += 1
+                    total_steps += 1
+
+                    agent.remember_encoded(grids[i], actions[i], reward, new_state, done)
                     if len(agent.memory) > agent.batch_size:
                         loss = agent.update()
                         if loss > 0:
                             losses.append(loss)
-                else:
-                    agent.store_reward(reward, done)
-                    if algorithm_name == "A2C" and (done or game_steps[i] >= agent.n_steps):
-                        loss = agent.update()
-                        if loss > 0:
-                            losses.append(loss)
-                    if algorithm_name == "PPO" and done:
-                        loss = agent.update()
-                        if loss > 0:
-                            losses.append(loss)
-                
-                states[i] = new_state
-                
-                # Prevent infinite loops per game - scale with snake length
-                # Short snake: 1000 steps max. Long snake needs much more time.
-                snake_len = len(games[i].snake)
-                max_steps = max(1000, snake_len * 10, 5000)  # At least 5000 for long snakes
-                if game_steps[i] > max_steps:
-                    games[i].game_over = True
+
+                    states[i] = new_state
+
+                    snake_len = len(games[i].snake)
+                    max_steps = max(1000, snake_len * 10, 5000)
+                    if game_steps[i] > max_steps:
+                        games[i].game_over = True
+            else:
+                # Original per-env path (flat DQN, PPO, A2C)
+                for i in range(num_envs):
+                    if games[i].game_over:
+                        continue  # Just reset above, skip stepping this iteration
+
+                    old_state = states[i]
+                    action = agent.get_action(old_state, training=True)
+
+                    new_state, reward, done = games[i].step(action)
+                    game_rewards[i] += reward
+                    game_steps[i] += 1
+                    total_steps += 1
+
+                    if algorithm_name == "DQN":
+                        agent.remember(old_state, action, reward, new_state, done)
+                        if len(agent.memory) > agent.batch_size:
+                            loss = agent.update()
+                            if loss > 0:
+                                losses.append(loss)
+                    else:
+                        agent.store_reward(reward, done)
+                        if algorithm_name == "A2C" and (done or game_steps[i] >= agent.n_steps):
+                            loss = agent.update()
+                            if loss > 0:
+                                losses.append(loss)
+                        if algorithm_name == "PPO" and done:
+                            loss = agent.update()
+                            if loss > 0:
+                                losses.append(loss)
+
+                    states[i] = new_state
+
+                    snake_len = len(games[i].snake)
+                    max_steps = max(1000, snake_len * 10, 5000)
+                    if game_steps[i] > max_steps:
+                        games[i].game_over = True
             
             # Log metrics periodically (only when new episodes have completed)
             if episode > 0 and episode % log_interval == 0 and episode > last_logged_episode and len(scores) >= log_interval:

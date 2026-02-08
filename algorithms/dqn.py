@@ -17,6 +17,10 @@ from game.state import GameState
 from .base import BaseAgent, encode_state, encode_state_grid
 from .networks import DQNCNNNetwork
 
+# Guided exploration constants (shared across agents)
+_OPPOSITE = {"up": "down", "down": "up", "left": "right", "right": "left"}
+_DIR_MAP_EXPLORE = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}
+
 
 class DQNNetwork(nn.Module):
     """DQN Neural Network - deeper architecture for richer state."""
@@ -255,86 +259,100 @@ class DQNCNNAgent(BaseAgent):
         
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        # CNN model + target network
+        # CNN model + target network (channels_last for CPU speedup via oneDNN)
         self.model = DQNCNNNetwork(num_channels=self.NUM_CHANNELS, action_size=self.ACTION_SIZE).to(self.device)
+        self.model = self.model.to(memory_format=torch.channels_last)
         self.target_model = DQNCNNNetwork(num_channels=self.NUM_CHANNELS, action_size=self.ACTION_SIZE).to(self.device)
+        self.target_model = self.target_model.to(memory_format=torch.channels_last)
         self.target_model.load_state_dict(self.model.state_dict())
         self.target_model.eval()
-        
+
         self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
         
-        # Cache
-        self._last_encoded_grid = None
-        self._last_state_id = None
-        
+    @staticmethod
+    def _guided_explore(state: GameState, best_action_idx: int) -> str:
+        """Epsilon-greedy guided exploration: prefer safe moves toward food."""
+        head_x, head_y = state.snake[0]
+        food_x, food_y = state.food
+        dx = food_x - head_x
+        dy = food_y - head_y
+
+        snake_set = set(state.snake[:-1])
+        wall_set = set(state.walls) if state.walls else set()
+
+        safe_actions = []
+        for action in BaseAgent.ACTIONS:
+            if state.direction and action == _OPPOSITE.get(state.direction):
+                continue
+            dx_move, dy_move = _DIR_MAP_EXPLORE[action]
+            next_pos = (head_x + dx_move, head_y + dy_move)
+            if (next_pos not in wall_set and
+                next_pos not in snake_set and
+                0 <= next_pos[0] < state.width and
+                0 <= next_pos[1] < state.height):
+                safe_actions.append(action)
+
+        if safe_actions:
+            preferred = []
+            if abs(dx) > abs(dy):
+                preferred.append("right" if dx > 0 else "left")
+            else:
+                preferred.append("down" if dy > 0 else "up")
+            preferred_safe = [a for a in preferred if a in safe_actions]
+            if preferred_safe and np.random.random() < 0.6:
+                return random.choice(preferred_safe)
+            return random.choice(safe_actions)
+        return BaseAgent.ACTIONS[best_action_idx]
+
     def get_action(self, state: GameState, training: bool = True) -> str:
-        """Get action using epsilon-greedy with guided exploration."""
-        # Encode as grid and cache
+        """Get action using epsilon-greedy with guided exploration (single state)."""
         grid = encode_state_grid(state)
-        self._last_encoded_grid = grid
-        self._last_state_id = id(state)
-        
-        grid_tensor = torch.FloatTensor(grid).unsqueeze(0).to(self.device)
-        
+        grid_tensor = torch.FloatTensor(grid).unsqueeze(0).to(
+            self.device, memory_format=torch.channels_last)
+
         with torch.no_grad():
             q_values = self.model(grid_tensor)
             best_action_idx = q_values.cpu().data.numpy().argmax()
-        
-        # Guided exploration (same logic as flat DQN)
+
         if training and np.random.random() <= self.epsilon:
-            head_x, head_y = state.snake[0]
-            food_x, food_y = state.food
-            dx = food_x - head_x
-            dy = food_y - head_y
-            
-            safe_actions = []
-            opposite = {"up": "down", "down": "up", "left": "right", "right": "left"}
-            direction_map = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}
-            
-            snake_set = set(state.snake[:-1])
-            wall_set = set(state.walls) if state.walls else set()
-            
-            for action in self.ACTIONS:
-                if state.direction and action == opposite.get(state.direction):
-                    continue
-                dx_move, dy_move = direction_map[action]
-                next_pos = (head_x + dx_move, head_y + dy_move)
-                if (next_pos not in wall_set and 
-                    next_pos not in snake_set and
-                    0 <= next_pos[0] < state.width and
-                    0 <= next_pos[1] < state.height):
-                    safe_actions.append(action)
-            
-            if safe_actions:
-                preferred = []
-                if abs(dx) > abs(dy):
-                    preferred.append("right" if dx > 0 else "left")
-                else:
-                    preferred.append("down" if dy > 0 else "up")
-                
-                preferred_safe = [a for a in preferred if a in safe_actions]
-                if preferred_safe and np.random.random() < 0.6:
-                    return random.choice(preferred_safe)
-                return random.choice(safe_actions)
-            else:
-                return self.ACTIONS[best_action_idx]
-        
+            return self._guided_explore(state, best_action_idx)
         return self.ACTIONS[best_action_idx]
-    
-    def remember(self, state: GameState, action: str, reward: float, 
+
+    def batch_get_actions(self, states, training=True):
+        """Get actions for multiple states in one batched forward pass.
+
+        Returns:
+            (actions, grids) — list of action strings and list of encoded grids
+            so the caller can pass grids to remember_encoded() without re-encoding.
+        """
+        grids = [encode_state_grid(s) for s in states]
+        batch_tensor = torch.FloatTensor(np.array(grids)).to(
+            self.device, memory_format=torch.channels_last)
+
+        with torch.no_grad():
+            q_values = self.model(batch_tensor)
+            best_indices = q_values.cpu().data.numpy().argmax(axis=1)
+
+        actions = []
+        for i, state in enumerate(states):
+            if training and np.random.random() <= self.epsilon:
+                actions.append(self._guided_explore(state, best_indices[i]))
+            else:
+                actions.append(self.ACTIONS[best_indices[i]])
+        return actions, grids
+
+    def remember(self, state: GameState, action: str, reward: float,
                  next_state: GameState, done: bool):
         """Store experience as float16 grids to save memory."""
+        grid = encode_state_grid(state)
+        self.remember_encoded(grid, action, reward, next_state, done)
+
+    def remember_encoded(self, grid: np.ndarray, action: str, reward: float,
+                         next_state: GameState, done: bool):
+        """Store experience with a pre-encoded grid (avoids double encoding)."""
         action_idx = self.ACTIONS.index(action)
-        
-        # Reuse cached grid for current state
-        if self._last_state_id == id(state) and self._last_encoded_grid is not None:
-            grid = self._last_encoded_grid
-        else:
-            grid = encode_state_grid(state)
-        
         next_grid = encode_state_grid(next_state)
-        # Store as float16 to reduce memory (~50% savings for large grids)
-        self.memory.append((grid.astype(np.float16), action_idx, reward, 
+        self.memory.append((grid.astype(np.float16), action_idx, reward,
                            next_grid.astype(np.float16), done))
         self.step_count += 1
     
@@ -347,16 +365,18 @@ class DQNCNNAgent(BaseAgent):
             return 0.0
         
         batch = random.sample(self.memory, self.batch_size)
-        # Convert float16 back to float32 for training
-        states = torch.FloatTensor(np.array([e[0] for e in batch], dtype=np.float32)).to(self.device)
+        # Convert float16 back to float32 for training (channels_last for CNN speedup)
+        states = torch.FloatTensor(np.array([e[0] for e in batch], dtype=np.float32)).to(
+            self.device, memory_format=torch.channels_last)
         actions = torch.LongTensor([e[1] for e in batch]).to(self.device)
         rewards = torch.FloatTensor([e[2] for e in batch]).to(self.device)
-        next_states = torch.FloatTensor(np.array([e[3] for e in batch], dtype=np.float32)).to(self.device)
+        next_states = torch.FloatTensor(np.array([e[3] for e in batch], dtype=np.float32)).to(
+            self.device, memory_format=torch.channels_last)
         dones = torch.FloatTensor([e[4] for e in batch]).to(self.device)
-        
+
         # Current Q values
         current_q = self.model(states).gather(1, actions.unsqueeze(1))
-        
+
         # Target network for stable Q estimates
         with torch.no_grad():
             next_q = self.target_model(next_states).max(1)[0]
