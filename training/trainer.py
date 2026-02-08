@@ -79,6 +79,7 @@ class Trainer:
         eval_interval: int = 1000,
         checkpoint_interval: int = 5000,
         log_interval: int = 100,
+        max_duration_seconds: int | None = None,
     ) -> dict[str, Any]:
         """Run training loop.
 
@@ -87,10 +88,12 @@ class Trainer:
             eval_interval: Steps between evaluations
             checkpoint_interval: Steps between checkpoints
             log_interval: Steps between logging
+            max_duration_seconds: Optional time limit in seconds
 
         Returns:
             Summary of training metrics
         """
+        self._max_duration = max_duration_seconds
         algorithm = self.config.get("algorithm", "dqn")
 
         if algorithm == "dqn":
@@ -121,6 +124,11 @@ class Trainer:
         start_time = time.time()
 
         for step in range(1, total_steps + 1):
+            # Check time limit
+            if self._max_duration and (time.time() - start_time) >= self._max_duration:
+                print(f"\nTime limit reached ({self._max_duration}s). Stopping at step {step}.")
+                break
+
             # Select action
             action = self.agent.get_action(obs)
 
@@ -159,6 +167,11 @@ class Trainer:
 
             # Logging
             if step % log_interval == 0:
+                elapsed = time.time() - start_time
+                remaining = (self._max_duration - elapsed) if self._max_duration else None
+                time_str = f" | Time: {elapsed:.0f}s"
+                if remaining is not None:
+                    time_str += f" / {self._max_duration}s (remaining: {remaining:.0f}s)"
                 self._log_step(step, train_metrics, start_time)
 
             # Evaluation
@@ -169,14 +182,15 @@ class Trainer:
                 if self.use_wandb:
                     wandb.log({f"eval/{k}": v for k, v in eval_metrics.items()}, step=step)
 
-                print(f"Step {step}: eval_score={eval_metrics['mean_score']:.1f}")
+                elapsed = time.time() - start_time
+                print(f"Step {step} ({elapsed:.0f}s): eval_score={eval_metrics['mean_score']:.1f}")
 
             # Checkpoint
             if step % checkpoint_interval == 0:
                 self._save_checkpoint(step)
 
         # Final save
-        self._save_checkpoint(total_steps)
+        self._save_checkpoint(step if step else total_steps)
         self.metrics.save(str(self.log_dir / "metrics.json"))
 
         if self.use_wandb:
@@ -404,13 +418,12 @@ class Trainer:
 
         self.agent.save(str(path))
 
-        # Save latest symlink
+        # Save latest copy (use copy instead of symlink for Windows compatibility)
+        import shutil
         latest = checkpoint_path / "latest.pt"
-        if latest.is_symlink():
+        if latest.exists():
             latest.unlink()
-        elif latest.exists():
-            latest.unlink()
-        latest.symlink_to(filename)
+        shutil.copy2(str(path), str(latest))
 
         if self.use_wandb:
             wandb.save(str(path))

@@ -78,16 +78,36 @@ class SnakeGame:
         # Place food in random empty cell
         self._spawn_food()
         
-        # Start spawning walls
-        self._spawn_walls()
+        # Walls disabled - focus on filling the board first
+        # self._spawn_walls()
 
         return self.get_state()
 
+    # Pre-compute treat weights for random.choices (avoid recomputing each spawn)
+    _TREAT_WEIGHTS = [treat[2] for treat in TREAT_TYPES]
+
     def _spawn_food(self) -> None:
-        """Spawn food in a random empty cell with weighted random type selection."""
-        # Get all empty cells (excluding snake and walls)
+        """Spawn food in a random empty cell with weighted random type selection.
+        Uses rejection sampling for speed when board is mostly empty."""
         snake_set = set(self.snake)
         wall_set = set(self.walls)
+        occupied_count = len(snake_set) + len(wall_set)
+        total_cells = self.width * self.height
+        
+        # Fast path: if board is <50% full, use rejection sampling (much faster than scanning)
+        if occupied_count < total_cells * 0.5:
+            blocked = snake_set | wall_set
+            for _ in range(100):  # Max attempts
+                x = random.randint(0, self.width - 1)
+                y = random.randint(0, self.height - 1)
+                if (x, y) not in blocked:
+                    treat_type = random.choices(self.TREAT_TYPES, weights=self._TREAT_WEIGHTS, k=1)[0]
+                    self.food = (x, y)
+                    self.food_type = treat_type[0]
+                    self.food_points = treat_type[1]
+                    return
+        
+        # Slow path: enumerate all empty cells (when board is crowded)
         empty_cells = [
             (x, y)
             for x in range(self.width)
@@ -96,15 +116,11 @@ class SnakeGame:
         ]
 
         if empty_cells:
-            # Select treat type based on weighted probability
-            weights = [treat[2] for treat in self.TREAT_TYPES]
-            treat_type = random.choices(self.TREAT_TYPES, weights=weights, k=1)[0]
-            
+            treat_type = random.choices(self.TREAT_TYPES, weights=self._TREAT_WEIGHTS, k=1)[0]
             self.food = random.choice(empty_cells)
-            self.food_type = treat_type[0]  # color
-            self.food_points = treat_type[1]  # points
+            self.food_type = treat_type[0]
+            self.food_points = treat_type[1]
         else:
-            # No empty cells (snake fills board - win condition)
             self.food = (-1, -1)
             self.food_type = "red"
             self.food_points = 1
@@ -220,16 +236,18 @@ class SnakeGame:
         old_distance = abs(old_head[0] - self.food[0]) + abs(old_head[1] - self.food[1])
         new_distance = abs(new_head[0] - self.food[0]) + abs(new_head[1] - self.food[1])
 
-        # REWARD STRUCTURE FOR SUPERHUMAN PLAY
-        # Key insight: direction incentive must be SOFT to allow detours around body
+        # REWARD STRUCTURE FOR PERFECT GAME (fill entire 20x20 board)
+        # Key changes from previous version:
+        # - Time pressure scales DOWN as snake grows (long snakes NEED more time to navigate)
+        # - More milestone bonuses up to 400 (full board)
+        # - Softer direction incentive so snake can take necessary detours
         reward = 0.0
         
-        # Soft direction incentive - allows the snake to take detours when needed
-        # The snake now has body awareness in its state, so it can learn WHEN to detour
+        # Soft direction incentive - allows detours around body
         if new_distance < old_distance:
-            reward += 0.1   # Small nudge toward food (was 0.5 - too aggressive)
+            reward += 0.1
         elif new_distance > old_distance:
-            reward -= 0.15  # Gentle penalty for moving away (was -1.0 - forced beelining)
+            reward -= 0.15
         
         if new_head == self.food:
             # TREAT COLLECTED! Reward based on speed
@@ -240,34 +258,44 @@ class SnakeGame:
             base_reward = float(self.food_points * 10)
             reward = base_reward * (1.0 + speed_multiplier)
             
-            # MILESTONE BONUSES - reward for growing longer
-            new_length = len(self.snake)  # After eating, snake is longer
-            if new_length >= 5 and old_snake_length < 5:
-                reward += 50.0
-            if new_length >= 10 and old_snake_length < 10:
-                reward += 100.0
-            if new_length >= 15 and old_snake_length < 15:
-                reward += 150.0
-            if new_length >= 20 and old_snake_length < 20:
-                reward += 200.0
-            if new_length >= 30 and old_snake_length < 30:
-                reward += 300.0
-            if new_length >= 50 and old_snake_length < 50:
-                reward += 500.0
+            # MILESTONE BONUSES - scaled up dramatically for long snakes
+            new_length = len(self.snake)
+            milestones = [
+                (5, 50), (10, 100), (15, 150), (20, 200),
+                (30, 300), (50, 500), (75, 750), (100, 1000),
+                (150, 1500), (200, 2000), (250, 3000), (300, 4000),
+                (350, 5000), (375, 7500), (390, 10000), (400, 20000),
+            ]
+            for threshold, bonus in milestones:
+                if new_length >= threshold and old_snake_length < threshold:
+                    reward += bonus
             
             # Add points to score
             self.score += self.food_points
             
-            # Reset counter and spawn new food/walls
+            # Reset counter and spawn new food
             self.steps_since_last_treat = 0
             self._spawn_food()
-            self._spawn_walls()
         else:
             # Remove tail if no food eaten
             self.snake.pop()
             
-            # Time pressure - encourages faster play but not too harsh
-            reward -= 0.03
+            # Time pressure SCALES with snake length:
+            # Short snake (len 3-20): -0.03 per step (move quickly!)
+            # Long snake (len 50+): -0.01 per step (more time to navigate)
+            # Very long snake (200+): -0.005 per step (needs lots of time for detours)
+            snake_len = len(self.snake)
+            if snake_len < 20:
+                time_penalty = 0.03
+            elif snake_len < 50:
+                time_penalty = 0.02
+            elif snake_len < 100:
+                time_penalty = 0.01
+            elif snake_len < 200:
+                time_penalty = 0.007
+            else:
+                time_penalty = 0.005
+            reward -= time_penalty
 
         return self.get_state(), reward, False
 

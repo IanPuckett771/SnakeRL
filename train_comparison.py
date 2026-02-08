@@ -13,21 +13,27 @@ from game.engine import SnakeGame
 from algorithms import DQNAgent, PPOAgent, A2CAgent
 
 
+NUM_PARALLEL_GAMES = 8  # Run this many games simultaneously for faster training
+
+
 def train_algorithm(agent, algorithm_name, duration_seconds=60, use_wandb=True, 
                    project_name="snakerl-comparison", run_id=None):
-    """Train a single algorithm."""
+    """Train a single algorithm with parallel game environments."""
     print(f"\n{'='*60}")
-    print(f"Training {algorithm_name}")
+    print(f"Training {algorithm_name} ({NUM_PARALLEL_GAMES} parallel envs)")
     print(f"{'='*60}\n")
     
     # Generate unique run ID if not provided
     if run_id is None:
         run_id = int(time.time())
     
-    # Initialize wandb run
+    # Initialize wandb run with timeout to prevent hanging
     run = None
     if use_wandb:
         try:
+            import os
+            os.environ["WANDB_INIT_TIMEOUT"] = "30"  # 30 second timeout
+            os.environ["WANDB_START_METHOD"] = "thread"
             run = wandb.init(
                 project=project_name,
                 name=f"{algorithm_name}-{int(time.time())}",
@@ -36,8 +42,10 @@ def train_algorithm(agent, algorithm_name, duration_seconds=60, use_wandb=True,
                 config={
                     "algorithm": algorithm_name,
                     "duration_seconds": duration_seconds,
+                    "parallel_envs": NUM_PARALLEL_GAMES,
                 },
-                reinit=True
+                reinit=True,
+                settings=wandb.Settings(init_timeout=30)
             )
             print(f"[OK] Wandb initialized: {run.url}")
             print(f"   View at: https://wandb.ai/{run.entity}/{project_name}/groups/algorithm-comparison")
@@ -60,12 +68,17 @@ def train_algorithm(agent, algorithm_name, duration_seconds=60, use_wandb=True,
                 "algorithm": algorithm_name,
             }, f)
         
-        game = SnakeGame(width=20, height=20)
+        # Create parallel game environments
+        games = [SnakeGame(width=20, height=20) for _ in range(NUM_PARALLEL_GAMES)]
+        states = [g.reset() for g in games]
+        game_rewards = [0.0] * NUM_PARALLEL_GAMES
+        game_steps = [0] * NUM_PARALLEL_GAMES
+        
         episode = 0
         scores = []
         episode_rewards = []
         episode_lengths = []
-        snake_lengths = []  # Track snake length for each episode
+        snake_lengths = []
         losses = []
         
         # Setup for intermediate checkpoints (10 stages)
@@ -76,80 +89,82 @@ def train_algorithm(agent, algorithm_name, duration_seconds=60, use_wandb=True,
         last_checkpoint_time = start_time
         stage = 0
         
-        # Use run_id to create unique checkpoint names with timestamp
         from datetime import datetime
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         checkpoint_prefix = f"{algorithm_name.lower()}_agent_{timestamp}"
         print(f"Checkpoint prefix: {checkpoint_prefix}")
         print(f"Checkpoints will be saved as: {checkpoint_prefix}_stage##.pt\n")
         
-        # Training loop
+        total_steps = 0
+        log_interval = 10  # Log every N completed episodes
+        last_logged_episode = 0  # Track to avoid duplicate logging
+        
+        # Training loop - step all games each iteration
         while time.time() - start_time < duration_seconds:
-            episode += 1
-            agent.episode = episode
-            state = game.reset()
-            total_reward = 0
-            steps = 0
-            episode_loss = []
-            
-            while not game.game_over:
-                # Get action from current state
-                old_state = state
-                action = agent.get_action(state, training=True)
+            # Step all parallel games
+            for i in range(NUM_PARALLEL_GAMES):
+                if games[i].game_over:
+                    # Episode finished - record stats and reset
+                    episode += 1
+                    agent.episode = episode
+                    snake_length = len(games[i].snake)
+                    
+                    scores.append(games[i].score)
+                    episode_rewards.append(game_rewards[i])
+                    episode_lengths.append(game_steps[i])
+                    snake_lengths.append(snake_length)
+                    
+                    # Reset this game
+                    states[i] = games[i].reset()
+                    game_rewards[i] = 0.0
+                    game_steps[i] = 0
+                    continue
                 
-                # Take step
-                state, reward, done = game.step(action)
-                total_reward += reward
-                steps += 1
+                old_state = states[i]
+                action = agent.get_action(old_state, training=True)
+                
+                new_state, reward, done = games[i].step(action)
+                game_rewards[i] += reward
+                game_steps[i] += 1
+                total_steps += 1
                 
                 if algorithm_name == "DQN":
-                    # Store experience for DQN (old_state -> action -> reward -> new_state)
-                    agent.remember(old_state, action, reward, state, done)
-                    
-                    # Update periodically
+                    agent.remember(old_state, action, reward, new_state, done)
                     if len(agent.memory) > agent.batch_size:
                         loss = agent.update()
                         if loss > 0:
-                            episode_loss.append(loss)
+                            losses.append(loss)
                 else:
-                    # PPO or A2C - store reward
                     agent.store_reward(reward, done)
-                    
-                    # Update for A2C every n_steps or on done
-                    if algorithm_name == "A2C" and (done or steps >= agent.n_steps):
+                    if algorithm_name == "A2C" and (done or game_steps[i] >= agent.n_steps):
                         loss = agent.update()
                         if loss > 0:
-                            episode_loss.append(loss)
+                            losses.append(loss)
+                    if algorithm_name == "PPO" and done:
+                        loss = agent.update()
+                        if loss > 0:
+                            losses.append(loss)
                 
-                # Prevent infinite loops
-                if steps > 1000:
-                    break
+                states[i] = new_state
+                
+                # Prevent infinite loops per game - scale with snake length
+                # Short snake: 1000 steps max. Long snake needs much more time.
+                snake_len = len(games[i].snake)
+                max_steps = max(1000, snake_len * 10, 5000)  # At least 5000 for long snakes
+                if game_steps[i] > max_steps:
+                    games[i].game_over = True
             
-            # Update for PPO at end of episode
-            if algorithm_name == "PPO" and game.game_over:
-                loss = agent.update()
-                if loss > 0:
-                    episode_loss.append(loss)
-            
-            # Track snake length at end of episode
-            snake_length = len(game.snake)
-            
-            scores.append(game.score)
-            episode_rewards.append(total_reward)
-            episode_lengths.append(steps)
-            snake_lengths.append(snake_length)
-            if episode_loss:
-                losses.append(np.mean(episode_loss))
-            
-            # Log metrics every 10 episodes
-            if episode % 10 == 0:
-                avg_score = np.mean(scores[-10:]) if scores else 0
-                avg_reward = np.mean(episode_rewards[-10:]) if episode_rewards else 0
-                avg_length = np.mean(episode_lengths[-10:]) if episode_lengths else 0
-                avg_snake_length = np.mean(snake_lengths[-10:]) if snake_lengths else 0
-                avg_loss = np.mean(losses[-10:]) if losses else 0
+            # Log metrics periodically (only when new episodes have completed)
+            if episode > 0 and episode % log_interval == 0 and episode > last_logged_episode and len(scores) >= log_interval:
+                last_logged_episode = episode
+                avg_score = np.mean(scores[-log_interval:])
+                avg_reward = np.mean(episode_rewards[-log_interval:])
+                avg_length = np.mean(episode_lengths[-log_interval:])
+                avg_snake_length = np.mean(snake_lengths[-log_interval:])
+                avg_loss = np.mean(losses[-100:]) if losses else 0
                 elapsed = time.time() - start_time
                 remaining = duration_seconds - elapsed
+                eps_per_sec = episode / max(elapsed, 1)
                 
                 # Update training lock file
                 try:
@@ -158,9 +173,10 @@ def train_algorithm(agent, algorithm_name, duration_seconds=60, use_wandb=True,
                             "start_time": start_time,
                             "duration": duration_seconds,
                             "episodes": episode,
-                            "avg_score": avg_score,
-                            "avg_snake_length": avg_snake_length,
+                            "avg_score": float(avg_score),
+                            "avg_snake_length": float(avg_snake_length),
                             "algorithm": algorithm_name,
+                            "eps_per_sec": round(eps_per_sec, 1),
                         }, f)
                 except:
                     pass
@@ -179,19 +195,21 @@ def train_algorithm(agent, algorithm_name, duration_seconds=60, use_wandb=True,
                 if use_wandb:
                     log_dict = {
                         "episode": episode,
-                        "score": game.score,
+                        "score": scores[-1] if scores else 0,
                         "avg_score_10": avg_score,
                         "avg_score_all": np.mean(scores) if scores else 0,
-                        "episode_reward": total_reward,
+                        "episode_reward": episode_rewards[-1] if episode_rewards else 0,
                         "avg_reward_10": avg_reward,
-                        "episode_length": steps,
+                        "episode_length": episode_lengths[-1] if episode_lengths else 0,
                         "avg_length_10": avg_length,
-                        "snake_length": snake_length,
+                        "snake_length": snake_lengths[-1] if snake_lengths else 0,
                         "avg_snake_length_10": avg_snake_length,
                         "avg_snake_length_all": np.mean(snake_lengths) if snake_lengths else 0,
                         "time_elapsed": elapsed,
                         "time_remaining": remaining,
                         "stage": stage,
+                        "total_steps": total_steps,
+                        "eps_per_sec": eps_per_sec,
                     }
                     if avg_loss > 0:
                         log_dict["loss"] = avg_loss
@@ -200,11 +218,12 @@ def train_algorithm(agent, algorithm_name, duration_seconds=60, use_wandb=True,
                     
                     wandb.log(log_dict)
                 
-                print(f"Episode {episode:4d} | Score: {game.score:3d} | "
-                      f"Avg Score (10): {avg_score:6.2f} | "
-                      f"Reward: {total_reward:7.2f} | "
-                      f"Steps: {steps:4d} | "
-                      f"Time left: {remaining:5.1f}s | "
+                print(f"Ep {episode:5d} | Score: {scores[-1]:3d} | "
+                      f"Avg(10): {avg_score:6.2f} | "
+                      f"SnakeLen: {avg_snake_length:5.1f} | "
+                      f"Eps/s: {eps_per_sec:5.1f} | "
+                      f"Steps: {total_steps:>8d} | "
+                      f"Left: {remaining:5.0f}s | "
                       f"Stage: {stage}/{num_stages}")
         
         # Save final checkpoint (stage 10 or final)
@@ -297,13 +316,13 @@ def main():
         # Create agent with improved settings for better learning
         if alg_name == "DQN":
             agent = DQNAgent(
-                lr=0.001,  # Learning rate
-                gamma=0.99,  # Higher discount for long-term planning
-                epsilon=1.0,  # Start with full exploration
+                lr=0.0005,  # Slightly lower LR for fine-tuning (was 0.001)
+                gamma=0.99,  # High discount for long-term planning
+                epsilon=1.0,  # Start with full exploration (overwritten by checkpoint)
                 epsilon_min=0.05,  # Keep some exploration
-                epsilon_decay=0.9995,  # Slow decay for 30 min training
-                memory_size=10000,  # Capped for CNN grid memory (~112MB)
-                batch_size=128  # Larger batches for more stable learning
+                epsilon_decay=0.9995,  # Slow decay
+                memory_size=100000,  # Much larger memory for diverse experiences
+                batch_size=256  # Larger batches for more stable gradients
             )
             
             # Try to load from previous checkpoint unless --fresh is specified
