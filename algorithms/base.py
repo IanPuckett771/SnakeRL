@@ -119,11 +119,93 @@ def encode_state(state: GameState) -> np.ndarray:
     return features
 
 
+def encode_state_grid(state: GameState) -> np.ndarray:
+    """Encode game state as a 7-channel grid for CNN input.
+
+    Channels:
+        0: Snake head — 1.0 at head position
+        1: Snake body — decaying gradient from 1.0 (neck) to 0.0 (tail)
+        2: Snake tail — 1.0 at tail position
+        3: Food — food_points / 20.0 at food cell
+        4: Walls — 1.0 at each wall cell
+        5: Direction — gradient in movement direction (full-board context)
+        6: Reachability — BFS from head: 1.0 = reachable, 0.0 = blocked
+
+    Returns:
+        np.ndarray of shape (7, height, width), dtype float32
+    """
+    width, height = state.width, state.height
+    grid = np.zeros((7, height, width), dtype=np.float32)
+
+    head_x, head_y = state.snake[0]
+    snake_len = len(state.snake)
+
+    # Channel 0: Head
+    grid[0, head_y, head_x] = 1.0
+
+    # Channel 1: Body gradient (1.0 at neck → 0.0 at tail)
+    if snake_len > 2:
+        for i, (bx, by) in enumerate(state.snake[1:-1], start=1):
+            grid[1, by, bx] = 1.0 - (i / (snake_len - 1))
+    elif snake_len == 2:
+        # Only head + tail, no body segments
+        pass
+
+    # Channel 2: Tail
+    tail_x, tail_y = state.snake[-1]
+    grid[2, tail_y, tail_x] = 1.0
+
+    # Channel 3: Food (scaled by points)
+    food_x, food_y = state.food
+    grid[3, food_y, food_x] = state.food_points / 20.0
+
+    # Channel 4: Walls
+    if state.walls:
+        for wx, wy in state.walls:
+            grid[4, wy, wx] = 1.0
+
+    # Channel 5: Direction gradient
+    dir_vectors = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}
+    dx, dy = dir_vectors.get(state.direction, (1, 0))
+    if dx != 0:
+        # Horizontal gradient
+        for col in range(width):
+            val = (col - head_x) * dx
+            grid[5, :, col] = val / max(width - 1, 1)
+    else:
+        # Vertical gradient
+        for row in range(height):
+            val = (row - head_y) * dy
+            grid[5, row, :] = val / max(height - 1, 1)
+
+    # Channel 6: Reachability via BFS from head
+    snake_set = set(state.snake[1:])  # body blocks movement
+    wall_set = set(state.walls) if state.walls else set()
+    blocked = snake_set | wall_set
+
+    visited = np.zeros((height, width), dtype=np.float32)
+    visited[head_y, head_x] = 1.0
+    queue = deque([(head_x, head_y)])
+    while queue:
+        cx, cy = queue.popleft()
+        for ddx, ddy in [(0, -1), (0, 1), (-1, 0), (1, 0)]:
+            nx, ny = cx + ddx, cy + ddy
+            if (0 <= nx < width and 0 <= ny < height
+                    and visited[ny, nx] == 0.0
+                    and (nx, ny) not in blocked):
+                visited[ny, nx] = 1.0
+                queue.append((nx, ny))
+    grid[6] = visited
+
+    return grid
+
+
 class BaseAgent:
     """Base class for RL agents."""
-    
+
     ACTIONS = ["up", "down", "left", "right"]
-    STATE_SIZE = 24  # Expanded from 12 to 24 features
+    STATE_SIZE = 24  # Legacy flat feature vector size
+    NUM_CHANNELS = 7  # CNN grid channels
     ACTION_SIZE = 4
     
     def __init__(self, algorithm_name: str):

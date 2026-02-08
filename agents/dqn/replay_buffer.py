@@ -1,24 +1,44 @@
-"""Experience replay buffer for DQN."""
+"""Experience replay buffer for DQN with pre-allocated arrays."""
 
 from __future__ import annotations
-
-import random
-from collections import deque
 
 import numpy as np
 import torch
 
 
 class ReplayBuffer:
-    """Fixed-size buffer to store experience tuples."""
+    """Fixed-size buffer using pre-allocated numpy arrays with circular indexing.
 
-    def __init__(self, capacity: int = 100000):
-        """Initialize buffer.
+    Much faster than deque[tuple] approach by avoiding:
+    - Python object creation for each experience tuple
+    - Triple array copies during sampling
+    - Random.sample() overhead
+    """
+
+    def __init__(
+        self,
+        capacity: int = 100000,
+        observation_shape: tuple[int, ...] = (3, 20, 20),
+    ):
+        """Initialize buffer with pre-allocated arrays.
 
         Args:
             capacity: Maximum number of experiences to store
+            observation_shape: Shape of observation arrays
         """
-        self.buffer: deque[tuple[np.ndarray, int, float, np.ndarray, bool]] = deque(maxlen=capacity)
+        self.capacity = capacity
+        self.observation_shape = observation_shape
+
+        # Pre-allocate storage arrays
+        self.states = np.zeros((capacity, *observation_shape), dtype=np.float32)
+        self.actions = np.zeros(capacity, dtype=np.int64)
+        self.rewards = np.zeros(capacity, dtype=np.float32)
+        self.next_states = np.zeros((capacity, *observation_shape), dtype=np.float32)
+        self.dones = np.zeros(capacity, dtype=np.float32)
+
+        # Circular buffer state
+        self.pos = 0
+        self.size = 0
 
     def push(
         self,
@@ -28,11 +48,21 @@ class ReplayBuffer:
         next_state: np.ndarray,
         done: bool,
     ) -> None:
-        """Add experience to buffer."""
-        self.buffer.append((state, action, reward, next_state, done))
+        """Add experience to buffer using circular indexing."""
+        self.states[self.pos] = state
+        self.actions[self.pos] = action
+        self.rewards[self.pos] = reward
+        self.next_states[self.pos] = next_state
+        self.dones[self.pos] = float(done)
+
+        self.pos = (self.pos + 1) % self.capacity
+        self.size = min(self.size + 1, self.capacity)
 
     def sample(self, batch_size: int, device: torch.device) -> dict[str, torch.Tensor]:
         """Sample a batch of experiences.
+
+        Uses numpy random indexing and torch.as_tensor for zero-copy
+        tensor creation when possible.
 
         Args:
             batch_size: Number of experiences to sample
@@ -41,17 +71,20 @@ class ReplayBuffer:
         Returns:
             Dict with states, actions, rewards, next_states, dones
         """
-        batch = random.sample(self.buffer, min(batch_size, len(self.buffer)))
+        # Sample random indices
+        indices = np.random.randint(0, self.size, size=min(batch_size, self.size))
 
-        states, actions, rewards, next_states, dones = zip(*batch)
+        # Use contiguous arrays for efficient tensor creation
+        states = np.ascontiguousarray(self.states[indices])
+        next_states = np.ascontiguousarray(self.next_states[indices])
 
         return {
-            "states": torch.FloatTensor(np.array(states)).to(device),
-            "actions": torch.LongTensor(actions).to(device),
-            "rewards": torch.FloatTensor(rewards).to(device),
-            "next_states": torch.FloatTensor(np.array(next_states)).to(device),
-            "dones": torch.FloatTensor(dones).to(device),
+            "states": torch.as_tensor(states, device=device),
+            "actions": torch.as_tensor(self.actions[indices], device=device),
+            "rewards": torch.as_tensor(self.rewards[indices], device=device),
+            "next_states": torch.as_tensor(next_states, device=device),
+            "dones": torch.as_tensor(self.dones[indices], device=device),
         }
 
     def __len__(self) -> int:
-        return len(self.buffer)
+        return self.size

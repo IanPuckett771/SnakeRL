@@ -1,7 +1,7 @@
 # SnakeRL Makefile
 # Reinforcement Learning Snake Game
 
-.PHONY: help install dev run clean lint format typecheck ci
+.PHONY: help install dev run clean lint format typecheck ci test test-fast
 
 # Default target - show help
 help:
@@ -73,4 +73,12 @@ format:
 typecheck:
 	mypy . --ignore-missing-imports
 
-ci: lint typecheck
+# Run all tests
+test:
+	pytest tests/ -v
+
+# Run tests without performance benchmarks
+test-fast:
+	pytest tests/ -v -k "not performance"
+
+ci: lint typecheck test

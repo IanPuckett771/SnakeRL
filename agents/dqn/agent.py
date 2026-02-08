@@ -57,8 +57,8 @@ class DQNAgent(BaseAgent):
         # Optimizer
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=learning_rate)
 
-        # Replay buffer
-        self.buffer = ReplayBuffer(buffer_size)
+        # Replay buffer with pre-allocated arrays
+        self.buffer = ReplayBuffer(buffer_size, observation_shape=observation_shape)
 
         # Training stats
         self.steps = 0

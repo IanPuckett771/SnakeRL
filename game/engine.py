@@ -317,3 +317,26 @@ class SnakeGame:
             width=self.width,
             height=self.height,
         )
+
+    def copy(self) -> "SnakeGame":
+        """Create a shallow copy optimized for MCTS simulation.
+
+        Much faster than copy.deepcopy() by avoiding __init__ and
+        using list copies instead of deep recursion.
+
+        Returns:
+            A new SnakeGame instance with copied state
+        """
+        new_game = object.__new__(SnakeGame)
+        new_game.width = self.width
+        new_game.height = self.height
+        new_game.snake = list(self.snake)  # Shallow copy of list of tuples
+        new_game.food = self.food  # Tuple is immutable
+        new_game.food_type = self.food_type
+        new_game.food_points = self.food_points
+        new_game.walls = list(self.walls)  # Shallow copy of list of tuples
+        new_game.direction = self.direction
+        new_game.score = self.score
+        new_game.steps_since_last_treat = self.steps_since_last_treat
+        new_game.game_over = self.game_over
+        return new_game
