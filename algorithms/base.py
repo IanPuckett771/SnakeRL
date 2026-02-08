@@ -119,8 +119,8 @@ def encode_state(state: GameState) -> np.ndarray:
     return features
 
 
-def encode_state_grid(state: GameState) -> np.ndarray:
-    """Encode game state as a 7-channel grid for CNN input.
+def _encode_state_grid_py(state: GameState) -> np.ndarray:
+    """Pure-Python encode_state_grid (fallback when Rust extension unavailable).
 
     Channels:
         0: Snake head — 1.0 at head position
@@ -198,6 +198,19 @@ def encode_state_grid(state: GameState) -> np.ndarray:
     grid[6] = visited
 
     return grid
+
+
+try:
+    from snakerl_rs import encode_state_grid as _encode_state_grid_rs
+
+    def encode_state_grid(state: GameState) -> np.ndarray:
+        """Encode game state as a 7-channel grid for CNN input (Rust-accelerated)."""
+        return _encode_state_grid_rs(
+            state.snake, state.food, state.food_points,
+            state.walls, state.direction, state.width, state.height,
+        )
+except ImportError:
+    encode_state_grid = _encode_state_grid_py
 
 
 class BaseAgent:

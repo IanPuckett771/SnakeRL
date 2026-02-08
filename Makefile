@@ -1,7 +1,7 @@
 # SnakeRL Makefile
 # Reinforcement Learning Snake Game
 
-.PHONY: help install dev run clean lint format typecheck ci test test-fast
+.PHONY: help install dev run clean lint format typecheck ci test test-fast build-rust
 
 # Default target - show help
 help:
@@ -33,6 +33,8 @@ install:
 	@echo "Installing dependencies..."
 	./venv/bin/pip install --upgrade pip
 	./venv/bin/pip install -r requirements.txt
+	@echo "Building Rust extension..."
+	./venv/bin/maturin develop --release 2>/dev/null || echo "Rust extension build skipped (install Rust toolchain to enable)"
 	@echo ""
 	@echo "Installation complete!"
 	@echo "Activate the virtual environment with: source venv/bin/activate"
@@ -80,5 +82,9 @@ test:
 # Run tests without performance benchmarks
 test-fast:
 	pytest tests/ -v -k "not performance"
+
+# Build Rust PyO3 extension (requires Rust toolchain)
+build-rust:
+	maturin develop --release
 
 ci: lint typecheck test

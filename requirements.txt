@@ -19,5 +19,8 @@ numba
 # Experiment Tracking
 wandb
 
+# Rust extension build tool
+maturin
+
 # Testing
 pytest
