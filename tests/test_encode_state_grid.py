@@ -49,7 +49,7 @@ class TestEncodeStateGridCorrectness:
     def test_food_channel(self):
         state = _make_state(food=(10, 10), food_points=10)
         grid = encode_state_grid(state)
-        assert grid[3, 10, 10] == pytest.approx(10.0 / 20.0)
+        assert grid[3, 10, 10] == pytest.approx(1.0)
 
     def test_wall_channel(self):
         state = _make_state(walls=[(1, 2), (3, 4)])

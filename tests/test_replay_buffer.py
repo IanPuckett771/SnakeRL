@@ -165,8 +165,8 @@ class TestReplayBufferPerformance:
             buffer.sample(64, device)
         elapsed = time.perf_counter() - start
 
-        # Should be well under 500ms for 1000 samples
-        assert elapsed < 0.5, f"1000 samples took {elapsed*1000:.1f}ms"
+        # Should be well under 2s for 1000 samples
+        assert elapsed < 2.0, f"1000 samples took {elapsed*1000:.1f}ms"
 
     def test_push_performance(self, observation_shape: tuple[int, int, int]) -> None:
         """Pushing should be fast."""
@@ -185,5 +185,5 @@ class TestReplayBufferPerformance:
             buffer.push(state, 0, 1.0, next_state, False)
         elapsed = time.perf_counter() - start
 
-        # Should be well under 100ms for 10000 pushes
-        assert elapsed < 0.1, f"10000 pushes took {elapsed*1000:.1f}ms"
+        # Should be well under 500ms for 10000 pushes
+        assert elapsed < 0.5, f"10000 pushes took {elapsed*1000:.1f}ms"

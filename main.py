@@ -40,8 +40,22 @@ async def serve_index():
 
 @app.get("/checkpoints")
 async def get_checkpoints():
-    """Return list of available checkpoints and best-replay availability."""
-    checkpoints = AgentInterface.list_checkpoints(str(CHECKPOINTS_DIR))
+    """Return list of available checkpoints with metadata and best-replay availability."""
+    filenames = AgentInterface.list_checkpoints(str(CHECKPOINTS_DIR))
+
+    # Build checkpoint list with sidecar metadata
+    checkpoints = []
+    for name in filenames:
+        entry = {"name": name}
+        meta_path = CHECKPOINTS_DIR / (name + ".meta.json")
+        if meta_path.exists():
+            try:
+                with open(meta_path, "r") as f:
+                    entry["meta"] = json.load(f)
+            except Exception:
+                pass
+        checkpoints.append(entry)
+
     result = {"checkpoints": checkpoints}
 
     # Include best-replay info if it exists

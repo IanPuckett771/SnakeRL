@@ -109,7 +109,8 @@ class TestSnakeEnvObservation:
         env = SnakeEnv(width=20, height=20)
         obs, _ = env.reset()
         assert obs.shape == (3, 20, 20)
-        assert obs.dtype == np.float32
+        import config
+        assert obs.dtype == config.OBSERVATION_DTYPE
 
     def test_observation_values(self) -> None:
         """Observation channels should have correct values."""

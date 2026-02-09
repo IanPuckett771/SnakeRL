@@ -211,7 +211,7 @@ target/
 Cargo.lock
 
 # SnakeRL project-specific
-# Trained model checkpoints (large binary files)
+# Trained model checkpoints (large binary files) and metadata sidecars
 checkpoints/
 *.pt
 *.pth

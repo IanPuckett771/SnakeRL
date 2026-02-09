@@ -359,23 +359,24 @@ class GameController {
         if (!Array.isArray(checkpoints) || checkpoints.length === 0) return;
 
         // Parse all checkpoints into structured data
-        const runs = {};       // timestamp -> { algo, stages: [{value, stage}] }
+        const runs = {};       // timestamp -> { algo, stages: [{value, stage, meta}] }
         const mainCheckpoints = [];  // e.g. dqn_agent.pt (no timestamp, no stage)
         const peakCheckpoints = [];  // e.g. dqn_peak_best.pt
-        
+
         checkpoints.forEach(cp => {
             const name = typeof cp === 'string' ? cp : (cp.path || cp.name || cp);
-            
+            const meta = (typeof cp === 'object' && cp.meta) ? cp.meta : null;
+
             // Skip non-.pt files and default_agent
             if (!name.endsWith('.pt') || name === 'default_agent.pt') return;
-            
+
             // Peak performance checkpoint: algo_peak_best.pt
             const peakMatch = name.match(/^(.+?)_peak_best\.pt$/);
             if (peakMatch) {
-                peakCheckpoints.push({ value: name, algo: peakMatch[1].toUpperCase() });
+                peakCheckpoints.push({ value: name, algo: peakMatch[1].toUpperCase(), meta });
                 return;
             }
-            
+
             // Timestamped stage: algo_agent_YYYYMMDD_HHMMSS_stageNN.pt
             const tsMatch = name.match(/^(.+?)_agent_(\d{8})_(\d{6})_stage(\d+)\.pt$/);
             if (tsMatch) {
@@ -384,25 +385,34 @@ class GameController {
                 const timeStr = tsMatch[3];  // HHMMSS
                 const ts = `${dateStr}_${timeStr}`;
                 const stageNum = parseInt(tsMatch[4]);
-                
+
                 if (!runs[ts]) {
                     runs[ts] = { algo, dateStr, timeStr, stages: [] };
                 }
-                runs[ts].stages.push({ value: name, stage: stageNum });
+                runs[ts].stages.push({ value: name, stage: stageNum, meta });
                 return;
             }
-            
+
             // Main checkpoint: algo_agent.pt (no timestamp)
             const mainMatch = name.match(/^(.+?)_agent\.pt$/);
             if (mainMatch) {
-                mainCheckpoints.push({ value: name, algo: mainMatch[1].toUpperCase() });
+                mainCheckpoints.push({ value: name, algo: mainMatch[1].toUpperCase(), meta });
                 return;
             }
         });
         
+        // Helper: format metadata stats string
+        const fmtMeta = (meta) => {
+            if (!meta) return '';
+            const parts = [];
+            if (meta.avg_snake_length != null) parts.push(`Avg: ${meta.avg_snake_length}`);
+            if (meta.max_snake_length != null) parts.push(`Max: ${meta.max_snake_length}`);
+            return parts.length > 0 ? ` [${parts.join(', ')}]` : '';
+        };
+
         // Sort runs by timestamp (newest first)
         const sortedTimestamps = Object.keys(runs).sort().reverse();
-        
+
         // ★ PEAK PERFORMANCE at the very top
         if (peakCheckpoints.length > 0) {
             const sep = document.createElement('option');
@@ -410,39 +420,39 @@ class GameController {
             sep.textContent = '━━ ★ PEAK PERFORMANCE ━━';
             sep.style.fontWeight = 'bold';
             this.checkpointSelect.appendChild(sep);
-            
+
             peakCheckpoints.forEach(cp => {
                 const opt = document.createElement('option');
                 opt.value = cp.value;
-                opt.textContent = `★ ${cp.algo} Peak Best`;
+                opt.textContent = `★ ${cp.algo} Peak Best${fmtMeta(cp.meta)}`;
                 opt.style.fontWeight = 'bold';
                 this.checkpointSelect.appendChild(opt);
             });
         }
-        
+
         // Add main "Current Model" checkpoint
         if (mainCheckpoints.length > 0) {
             const sep = document.createElement('option');
             sep.disabled = true;
             sep.textContent = '━━ CURRENT MODEL ━━';
             this.checkpointSelect.appendChild(sep);
-            
+
             mainCheckpoints.forEach(cp => {
                 const opt = document.createElement('option');
                 opt.value = cp.value;
-                opt.textContent = `${cp.algo} - Current Best`;
+                opt.textContent = `${cp.algo} - Current Best${fmtMeta(cp.meta)}`;
                 this.checkpointSelect.appendChild(opt);
             });
         }
-        
+
         // Add each training run as a group
         sortedTimestamps.forEach((ts, runIndex) => {
             const run = runs[ts];
             run.stages.sort((a, b) => a.stage - b.stage);
-            
+
             const totalStages = run.stages.length;
             const bestStage = run.stages[run.stages.length - 1];
-            
+
             // Format date nicely: "Feb 8, 2026 12:05 PM"
             const year = run.dateStr.substring(0, 4);
             const month = parseInt(run.dateStr.substring(4, 6));
@@ -453,16 +463,16 @@ class GameController {
             const hour12 = hour % 12 || 12;
             const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
             const dateLabel = `${monthNames[month-1]} ${day}, ${year} ${hour12}:${min} ${ampm}`;
-            
+
             // Run label
             const runLabel = runIndex === 0 ? 'LATEST RUN' : `RUN #${sortedTimestamps.length - runIndex}`;
-            
+
             // Separator with run info
             const sep = document.createElement('option');
             sep.disabled = true;
             sep.textContent = `━━ ${runLabel}: ${run.algo} - ${dateLabel} (${totalStages} stages) ━━`;
             this.checkpointSelect.appendChild(sep);
-            
+
             // Add each stage with progress indicator
             run.stages.forEach(item => {
                 const opt = document.createElement('option');
@@ -470,7 +480,7 @@ class GameController {
                 const pct = Math.round((item.stage / 10) * 100);
                 const bar = '█'.repeat(Math.round(item.stage / 2)) + '░'.repeat(5 - Math.round(item.stage / 2));
                 const isBest = item.stage === bestStage.stage;
-                opt.textContent = `  ${bar} Stage ${item.stage}/10 (${pct}%)${isBest ? ' ★ Best' : ''}`;
+                opt.textContent = `  ${bar} Stage ${item.stage}/10 (${pct}%)${fmtMeta(item.meta)}${isBest ? ' ★' : ''}`;
                 if (runIndex === 0) {
                     opt.style.fontWeight = 'bold';
                 }

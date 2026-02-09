@@ -19,7 +19,7 @@ if TORCH_AVAILABLE:
     class SimpleDQN(nn.Module):
         """Simple Deep Q-Network for Snake (legacy flat vector)."""
 
-        def __init__(self, state_size=24, action_size=4, hidden_size=256):
+        def __init__(self, state_size=44, action_size=4, hidden_size=256):
             super(SimpleDQN, self).__init__()
             self.fc1 = nn.Linear(state_size, hidden_size)
             self.fc2 = nn.Linear(hidden_size, hidden_size)
@@ -81,7 +81,7 @@ class AgentInterface:
                     self.model_type = 'cnn'
                 else:
                     # Legacy flat checkpoint
-                    self.model = SimpleDQN(state_size=24, action_size=4).to(self.device)
+                    self.model = SimpleDQN(state_size=44, action_size=4).to(self.device)
                     if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
                         self.model.load_state_dict(checkpoint['model_state_dict'])
                     else:
@@ -95,45 +95,6 @@ class AgentInterface:
                 print(f"Error loading checkpoint: {e}")
                 return False
         return False
-
-    def _encode_state_legacy(self, state: GameState) -> np.ndarray:
-        """Encode game state into a flat feature vector (legacy)."""
-        head_x, head_y = state.snake[0]
-        food_x, food_y = state.food
-
-        width, height = state.width, state.height
-
-        direction_map = {"up": 0, "down": 1, "left": 2, "right": 3}
-        direction_idx = direction_map.get(state.direction, 0)
-        direction_onehot = [0.0] * 4
-        direction_onehot[direction_idx] = 1.0
-
-        dangers = []
-        directions = [(0, -1), (0, 1), (-1, 0), (1, 0)]
-
-        for dx, dy in directions:
-            next_x, next_y = head_x + dx, head_y + dy
-            is_danger = (
-                next_x < 0 or next_x >= width or
-                next_y < 0 or next_y >= height or
-                (next_x, next_y) in state.walls or
-                (next_x, next_y) in state.snake[:-1]
-            )
-            dangers.append(1.0 if is_danger else 0.0)
-
-        food_dx = (food_x - head_x) / width if width > 0 else 0
-        food_dy = (food_y - head_y) / height if height > 0 else 0
-
-        features = [
-            head_x / width if width > 0 else 0,
-            head_y / height if height > 0 else 0,
-            food_dx,
-            food_dy,
-            *direction_onehot,
-            *dangers,
-        ]
-
-        return np.array(features, dtype=np.float32)
 
     def get_action(self, state: GameState) -> str:
         """Get the next action for the given state.
@@ -155,7 +116,8 @@ class AgentInterface:
                     grid = encode_state_grid(state)
                     state_tensor = torch.FloatTensor(grid).unsqueeze(0).to(self.device)
                 else:
-                    state_encoded = self._encode_state_legacy(state)
+                    from algorithms.base import encode_state
+                    state_encoded = encode_state(state)
                     state_tensor = torch.FloatTensor(state_encoded).unsqueeze(0).to(self.device)
 
                 with torch.no_grad():
