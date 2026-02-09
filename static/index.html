@@ -124,6 +124,172 @@
             display: block;
         }
 
+        /* Custom checkpoint card selector */
+        .checkpoint-list {
+            max-height: 220px;
+            overflow-y: auto;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .checkpoint-list::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .checkpoint-list::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .checkpoint-list::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 3px;
+        }
+
+        .checkpoint-card {
+            padding: 8px 10px;
+            cursor: pointer;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            transition: background 0.15s;
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+        }
+
+        .checkpoint-card:last-child {
+            border-bottom: none;
+        }
+
+        .checkpoint-card:hover {
+            background: rgba(255, 255, 255, 0.08);
+        }
+
+        .checkpoint-card.selected {
+            background: rgba(0, 255, 0, 0.1);
+            border-left: 3px solid #00ff00;
+        }
+
+        .checkpoint-card .radio {
+            flex-shrink: 0;
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            margin-top: 2px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .checkpoint-card.selected .radio {
+            border-color: #00ff00;
+        }
+
+        .checkpoint-card.selected .radio::after {
+            content: '';
+            width: 6px;
+            height: 6px;
+            background: #00ff00;
+            border-radius: 50%;
+        }
+
+        .checkpoint-card-body {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .checkpoint-card-title {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #eee;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .checkpoint-card.selected .checkpoint-card-title {
+            color: #00ff00;
+        }
+
+        .checkpoint-card-subtitle {
+            font-size: 0.75rem;
+            color: #888;
+            margin-top: 2px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .checkpoint-card-badge {
+            flex-shrink: 0;
+            font-size: 0.65rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 600;
+            text-transform: uppercase;
+            margin-top: 1px;
+        }
+
+        .badge-recommended {
+            background: rgba(0, 255, 0, 0.2);
+            color: #00ff00;
+        }
+
+        .badge-peak {
+            background: rgba(255, 215, 0, 0.2);
+            color: #ffd700;
+        }
+
+        .badge-replay {
+            background: rgba(0, 136, 255, 0.2);
+            color: #44aaff;
+        }
+
+        .checkpoint-section-header {
+            padding: 6px 10px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: #666;
+            letter-spacing: 0.5px;
+            background: rgba(0, 0, 0, 0.15);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .checkpoint-section-toggle {
+            padding: 6px 10px;
+            font-size: 0.75rem;
+            color: #888;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            transition: background 0.15s;
+        }
+
+        .checkpoint-section-toggle:hover {
+            background: rgba(255, 255, 255, 0.05);
+            color: #aaa;
+        }
+
+        .checkpoint-section-toggle .arrow {
+            font-size: 0.65rem;
+            transition: transform 0.2s;
+        }
+
+        .checkpoint-section-toggle.expanded .arrow {
+            transform: rotate(90deg);
+        }
+
+        .checkpoint-section-items {
+            display: none;
+        }
+
+        .checkpoint-section-items.expanded {
+            display: block;
+        }
+
         .opponent-group {
             display: none;
         }
@@ -507,10 +673,16 @@
             </div>
 
             <div class="setting-group checkpoint-group" id="checkpointGroup">
-                <label for="checkpoint">Checkpoint</label>
-                <select id="checkpoint">
-                    <option value="">Select a checkpoint...</option>
-                </select>
+                <label>Checkpoint</label>
+                <div id="checkpointList" class="checkpoint-list">
+                    <div class="checkpoint-card selected" data-value="">
+                        <div class="radio"></div>
+                        <div class="checkpoint-card-body">
+                            <div class="checkpoint-card-title">Default Agent (Heuristic)</div>
+                            <div class="checkpoint-card-subtitle">Rule-based fallback</div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div class="setting-group opponent-group" id="opponentGroup">

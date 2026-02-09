@@ -24,7 +24,7 @@ class GameController {
         this.gameOverOverlay = document.getElementById('gameOverOverlay');
         this.leaderboardList = document.getElementById('leaderboardList');
         this.checkpointGroup = document.getElementById('checkpointGroup');
-        this.checkpointSelect = document.getElementById('checkpoint');
+        this.checkpointList = document.getElementById('checkpointList');
         this.checkpointInfo = document.getElementById('checkpointInfo');
         this.checkpointName = document.getElementById('checkpointName');
         this.checkpointMeta = document.getElementById('checkpointMeta');
@@ -35,7 +35,8 @@ class GameController {
         // Track last checkpoint used for "Play Again"
         this.lastCheckpoint = null;
         this.lastMode = 'play';
-        
+        this._fetchingCheckpoints = false;
+
         // Check for training progress periodically
         this.trainingCheckInterval = null;
         this.checkpointRefreshInterval = null;
@@ -148,6 +149,13 @@ class GameController {
         this.submitScoreBtn.addEventListener('click', () => this.submitScore());
         this.playAgainBtn.addEventListener('click', () => this.playAgain());
         this.closeOverlayBtn.addEventListener('click', () => this.closeOverlay());
+
+        // Click outside the game-over content to dismiss
+        this.gameOverOverlay.addEventListener('click', (e) => {
+            if (e.target === this.gameOverOverlay) {
+                this.closeOverlay();
+            }
+        });
 
         // Allow Enter key to submit score
         this.playerNameInput.addEventListener('keydown', (e) => {
@@ -265,23 +273,29 @@ class GameController {
     }
 
     /**
+     * Get the currently selected checkpoint value
+     * @returns {string} Checkpoint filename or empty string
+     */
+    get selectedCheckpoint() {
+        const card = this.checkpointList.querySelector('.checkpoint-card.selected');
+        return card ? card.dataset.value : '';
+    }
+
+    /**
      * Set the game mode
      * @param {string} mode - 'play' or 'agent'
      */
     setMode(mode) {
-        // Preserve checkpoint selection when switching modes
-        const currentCheckpoint = this.checkpointSelect.value;
-        
         this.currentMode = mode;
 
         // Update button states
         this.playModeBtn.classList.toggle('active', mode === 'play');
         this.watchModeBtn.classList.toggle('active', mode === 'agent');
 
-        // Show/hide checkpoint dropdown
+        // Show/hide checkpoint list
         this.checkpointGroup.classList.toggle('visible', mode === 'agent');
 
-        // Fetch checkpoints if switching to agent mode (will preserve selection)
+        // Fetch checkpoints if switching to agent mode
         if (mode === 'agent') {
             this.fetchCheckpoints();
         }
@@ -291,202 +305,338 @@ class GameController {
     }
 
     /**
+     * Select a checkpoint card by data-value
+     * @param {string} value - The checkpoint value to select
+     */
+    selectCheckpointCard(value) {
+        const cards = this.checkpointList.querySelectorAll('.checkpoint-card');
+        let found = false;
+        cards.forEach(card => {
+            if (card.dataset.value === value) {
+                card.classList.add('selected');
+                found = true;
+            } else {
+                card.classList.remove('selected');
+            }
+        });
+        return found;
+    }
+
+    /**
      * Fetch available checkpoints from the server
      */
     async fetchCheckpoints() {
+        if (this._fetchingCheckpoints) return;
+        this._fetchingCheckpoints = true;
+
         try {
             // Preserve current selection before repopulating
-            const currentSelection = this.checkpointSelect.value;
-            
+            const currentSelection = this.selectedCheckpoint;
+
             const response = await fetch('/checkpoints');
             if (!response.ok) {
                 throw new Error('Failed to fetch checkpoints');
             }
 
             const data = await response.json();
-            // Backend returns {checkpoints: [...]}, so extract the array
             const checkpoints = data.checkpoints || data;
-            this.populateCheckpointDropdown(checkpoints, data.best_replay || null);
-            
-            // Restore selection if it still exists in the new options
+            this.populateCheckpointList(checkpoints, data.best_replay || null);
+
+            // Restore selection if it still exists
             if (currentSelection) {
-                const hasOption = Array.from(this.checkpointSelect.options).some(
-                    opt => opt.value === currentSelection
-                );
-                if (hasOption) {
-                    this.checkpointSelect.value = currentSelection;
-                }
+                this.selectCheckpointCard(currentSelection);
             }
         } catch (error) {
             console.error('Error fetching checkpoints:', error);
-            this.checkpointSelect.innerHTML = '<option value="">No checkpoints available</option>';
+            this.checkpointList.innerHTML = `
+                <div class="checkpoint-card selected" data-value="">
+                    <div class="radio"></div>
+                    <div class="checkpoint-card-body">
+                        <div class="checkpoint-card-title">No checkpoints available</div>
+                    </div>
+                </div>`;
+        } finally {
+            this._fetchingCheckpoints = false;
         }
     }
 
     /**
-     * Populate the checkpoint dropdown with organized hierarchy.
-     * Groups by training run, shows date/time, stage progression, and best result.
-     * @param {Array} checkpoints - Array of checkpoint objects
+     * Create a checkpoint card element
+     * @param {string} value - data-value for the card
+     * @param {string} title - Card title text
+     * @param {string} subtitle - Card subtitle text
+     * @param {string} badgeClass - Optional badge CSS class
+     * @param {string} badgeText - Optional badge text
+     * @returns {HTMLElement} The card element
      */
-    populateCheckpointDropdown(checkpoints, bestReplay) {
-        this.checkpointSelect.innerHTML = '';
+    createCheckpointCard(value, title, subtitle, badgeClass, badgeText) {
+        const card = document.createElement('div');
+        card.className = 'checkpoint-card';
+        card.dataset.value = value;
 
-        // Default option
-        const defaultOpt = document.createElement('option');
-        defaultOpt.value = '';
-        defaultOpt.textContent = 'Default Agent (Heuristic)';
-        this.checkpointSelect.appendChild(defaultOpt);
+        const radio = document.createElement('div');
+        radio.className = 'radio';
 
-        // Best Replay option — only show when replay data exists
-        if (bestReplay) {
-            const replaySep = document.createElement('option');
-            replaySep.disabled = true;
-            replaySep.textContent = '━━ ★ BEST SINGLE GAME EVER ━━';
-            replaySep.style.fontWeight = 'bold';
-            this.checkpointSelect.appendChild(replaySep);
+        const body = document.createElement('div');
+        body.className = 'checkpoint-card-body';
 
-            const replayOpt = document.createElement('option');
-            replayOpt.value = '__best_replay__';
-            const parts = [];
-            if (bestReplay.length != null) parts.push(`Length: ${bestReplay.length}`);
-            if (bestReplay.score != null) parts.push(`Score: ${bestReplay.score}`);
-            const statsStr = parts.length > 0 ? ` (${parts.join(', ')})` : '';
-            replayOpt.textContent = `▶ Watch Best Game${statsStr}`;
-            replayOpt.style.fontWeight = 'bold';
-            this.checkpointSelect.appendChild(replayOpt);
+        const titleEl = document.createElement('div');
+        titleEl.className = 'checkpoint-card-title';
+        titleEl.textContent = title;
+        body.appendChild(titleEl);
+
+        if (subtitle) {
+            const subEl = document.createElement('div');
+            subEl.className = 'checkpoint-card-subtitle';
+            subEl.textContent = subtitle;
+            body.appendChild(subEl);
         }
 
-        if (!Array.isArray(checkpoints) || checkpoints.length === 0) return;
+        card.appendChild(radio);
+        card.appendChild(body);
 
-        // Parse all checkpoints into structured data
-        const runs = {};       // timestamp -> { algo, stages: [{value, stage, meta}] }
-        const mainCheckpoints = [];  // e.g. dqn_agent.pt (no timestamp, no stage)
-        const peakCheckpoints = [];  // e.g. dqn_peak_best.pt
+        if (badgeClass && badgeText) {
+            const badge = document.createElement('div');
+            badge.className = `checkpoint-card-badge ${badgeClass}`;
+            badge.textContent = badgeText;
+            card.appendChild(badge);
+        }
 
-        checkpoints.forEach(cp => {
-            const name = typeof cp === 'string' ? cp : (cp.path || cp.name || cp);
-            const meta = (typeof cp === 'object' && cp.meta) ? cp.meta : null;
-
-            // Skip non-.pt files and default_agent
-            if (!name.endsWith('.pt') || name === 'default_agent.pt') return;
-
-            // Peak performance checkpoint: algo_peak_best.pt
-            const peakMatch = name.match(/^(.+?)_peak_best\.pt$/);
-            if (peakMatch) {
-                peakCheckpoints.push({ value: name, algo: peakMatch[1].toUpperCase(), meta });
-                return;
-            }
-
-            // Timestamped stage: algo_agent_YYYYMMDD_HHMMSS_stageNN.pt
-            const tsMatch = name.match(/^(.+?)_agent_(\d{8})_(\d{6})_stage(\d+)\.pt$/);
-            if (tsMatch) {
-                const algo = tsMatch[1].toUpperCase();
-                const dateStr = tsMatch[2];  // YYYYMMDD
-                const timeStr = tsMatch[3];  // HHMMSS
-                const ts = `${dateStr}_${timeStr}`;
-                const stageNum = parseInt(tsMatch[4]);
-
-                if (!runs[ts]) {
-                    runs[ts] = { algo, dateStr, timeStr, stages: [] };
-                }
-                runs[ts].stages.push({ value: name, stage: stageNum, meta });
-                return;
-            }
-
-            // Main checkpoint: algo_agent.pt (no timestamp)
-            const mainMatch = name.match(/^(.+?)_agent\.pt$/);
-            if (mainMatch) {
-                mainCheckpoints.push({ value: name, algo: mainMatch[1].toUpperCase(), meta });
-                return;
-            }
+        card.addEventListener('click', () => {
+            this.checkpointList.querySelectorAll('.checkpoint-card').forEach(c => c.classList.remove('selected'));
+            card.classList.add('selected');
         });
-        
-        // Helper: format metadata stats string
+
+        return card;
+    }
+
+    /**
+     * Populate the checkpoint list with card-based UI.
+     * Groups by training run, shows metadata, auto-selects best.
+     * @param {Array} checkpoints - Array of checkpoint objects
+     * @param {Object} bestReplay - Best replay metadata or null
+     */
+    populateCheckpointList(checkpoints, bestReplay) {
+        this.checkpointList.innerHTML = '';
+
+        // Determine what will be auto-selected (set later)
+        let autoSelectValue = '';
+
+        // --- Parse checkpoints into structured data ---
+        const runs = {};
+        const mainCheckpoints = [];
+        const peakCheckpoints = [];
+
+        if (Array.isArray(checkpoints)) {
+            checkpoints.forEach(cp => {
+                const name = typeof cp === 'string' ? cp : (cp.path || cp.name || cp);
+                const meta = (typeof cp === 'object' && cp.meta) ? cp.meta : null;
+
+                if (!name.endsWith('.pt') || name === 'default_agent.pt') return;
+
+                const peakMatch = name.match(/^(.+?)_peak_best\.pt$/);
+                if (peakMatch) {
+                    peakCheckpoints.push({ value: name, algo: peakMatch[1].toUpperCase(), meta });
+                    return;
+                }
+
+                const tsMatch = name.match(/^(.+?)_agent_(\d{8})_(\d{6})_stage(\d+)\.pt$/);
+                if (tsMatch) {
+                    const algo = tsMatch[1].toUpperCase();
+                    const dateStr = tsMatch[2];
+                    const timeStr = tsMatch[3];
+                    const ts = `${dateStr}_${timeStr}`;
+                    const stageNum = parseInt(tsMatch[4]);
+
+                    if (!runs[ts]) {
+                        runs[ts] = { algo, dateStr, timeStr, stages: [] };
+                    }
+                    runs[ts].stages.push({ value: name, stage: stageNum, meta });
+                    return;
+                }
+
+                const mainMatch = name.match(/^(.+?)_agent\.pt$/);
+                if (mainMatch) {
+                    mainCheckpoints.push({ value: name, algo: mainMatch[1].toUpperCase(), meta });
+                    return;
+                }
+            });
+        }
+
         const fmtMeta = (meta) => {
             if (!meta) return '';
             const parts = [];
             if (meta.avg_snake_length != null) parts.push(`Avg: ${meta.avg_snake_length}`);
             if (meta.max_snake_length != null) parts.push(`Max: ${meta.max_snake_length}`);
-            return parts.length > 0 ? ` [${parts.join(', ')}]` : '';
+            return parts.length > 0 ? parts.join(', ') : '';
         };
 
-        // Sort runs by timestamp (newest first)
+        // Short label for avg snake length in card titles
+        const avgLabel = (meta) => {
+            if (!meta || meta.avg_snake_length == null) return '';
+            return ` (Avg ${meta.avg_snake_length})`;
+        };
+
         const sortedTimestamps = Object.keys(runs).sort().reverse();
 
-        // ★ PEAK PERFORMANCE at the very top
-        if (peakCheckpoints.length > 0) {
-            const sep = document.createElement('option');
-            sep.disabled = true;
-            sep.textContent = '━━ ★ PEAK PERFORMANCE ━━';
-            sep.style.fontWeight = 'bold';
-            this.checkpointSelect.appendChild(sep);
-
-            peakCheckpoints.forEach(cp => {
-                const opt = document.createElement('option');
-                opt.value = cp.value;
-                opt.textContent = `★ ${cp.algo} Peak Best${fmtMeta(cp.meta)}`;
-                opt.style.fontWeight = 'bold';
-                this.checkpointSelect.appendChild(opt);
-            });
+        // --- Determine auto-select: latest run's highest stage > peak > main > default ---
+        if (sortedTimestamps.length > 0) {
+            const latestRun = runs[sortedTimestamps[0]];
+            latestRun.stages.sort((a, b) => a.stage - b.stage);
+            autoSelectValue = latestRun.stages[latestRun.stages.length - 1].value;
+        } else if (peakCheckpoints.length > 0) {
+            autoSelectValue = peakCheckpoints[0].value;
+        } else if (mainCheckpoints.length > 0) {
+            autoSelectValue = mainCheckpoints[0].value;
         }
 
-        // Add main "Current Model" checkpoint
-        if (mainCheckpoints.length > 0) {
-            const sep = document.createElement('option');
-            sep.disabled = true;
-            sep.textContent = '━━ CURRENT MODEL ━━';
-            this.checkpointSelect.appendChild(sep);
-
-            mainCheckpoints.forEach(cp => {
-                const opt = document.createElement('option');
-                opt.value = cp.value;
-                opt.textContent = `${cp.algo} - Current Best${fmtMeta(cp.meta)}`;
-                this.checkpointSelect.appendChild(opt);
-            });
-        }
-
-        // Add each training run as a group
-        sortedTimestamps.forEach((ts, runIndex) => {
+        // --- Latest Run (top section) ---
+        if (sortedTimestamps.length > 0) {
+            const ts = sortedTimestamps[0];
             const run = runs[ts];
             run.stages.sort((a, b) => a.stage - b.stage);
-
-            const totalStages = run.stages.length;
             const bestStage = run.stages[run.stages.length - 1];
 
-            // Format date nicely: "Feb 8, 2026 12:05 PM"
-            const year = run.dateStr.substring(0, 4);
-            const month = parseInt(run.dateStr.substring(4, 6));
-            const day = parseInt(run.dateStr.substring(6, 8));
-            const hour = parseInt(run.timeStr.substring(0, 2));
-            const min = run.timeStr.substring(2, 4);
-            const ampm = hour >= 12 ? 'PM' : 'AM';
-            const hour12 = hour % 12 || 12;
-            const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-            const dateLabel = `${monthNames[month-1]} ${day}, ${year} ${hour12}:${min} ${ampm}`;
+            const header = document.createElement('div');
+            header.className = 'checkpoint-section-header';
+            header.textContent = 'Latest Run';
+            this.checkpointList.appendChild(header);
 
-            // Run label
-            const runLabel = runIndex === 0 ? 'LATEST RUN' : `RUN #${sortedTimestamps.length - runIndex}`;
+            // Show the best stage from latest run as the recommended card
+            const metaStr = fmtMeta(bestStage.meta);
+            const subtitle = `Stage ${bestStage.stage}/10` + (metaStr ? ` · ${metaStr}` : '');
+            const card = this.createCheckpointCard(
+                bestStage.value,
+                `${run.algo} - Latest${avgLabel(bestStage.meta)}`,
+                subtitle,
+                'badge-recommended',
+                'Best'
+            );
+            this.checkpointList.appendChild(card);
 
-            // Separator with run info
-            const sep = document.createElement('option');
-            sep.disabled = true;
-            sep.textContent = `━━ ${runLabel}: ${run.algo} - ${dateLabel} (${totalStages} stages) ━━`;
-            this.checkpointSelect.appendChild(sep);
+            // If there are other stages in the latest run, show them
+            if (run.stages.length > 1) {
+                const otherStages = run.stages.slice(0, -1).reverse();
+                otherStages.forEach(item => {
+                    const ms = fmtMeta(item.meta);
+                    const sub = `Stage ${item.stage}/10` + (ms ? ` · ${ms}` : '');
+                    const c = this.createCheckpointCard(item.value, `${run.algo} - Stage ${item.stage}${avgLabel(item.meta)}`, sub);
+                    this.checkpointList.appendChild(c);
+                });
+            }
+        }
 
-            // Add each stage with progress indicator
-            run.stages.forEach(item => {
-                const opt = document.createElement('option');
-                opt.value = item.value;
-                const pct = Math.round((item.stage / 10) * 100);
-                const bar = '█'.repeat(Math.round(item.stage / 2)) + '░'.repeat(5 - Math.round(item.stage / 2));
-                const isBest = item.stage === bestStage.stage;
-                opt.textContent = `  ${bar} Stage ${item.stage}/10 (${pct}%)${fmtMeta(item.meta)}${isBest ? ' ★' : ''}`;
-                if (runIndex === 0) {
-                    opt.style.fontWeight = 'bold';
-                }
-                this.checkpointSelect.appendChild(opt);
+        // --- Peak Performance ---
+        if (peakCheckpoints.length > 0) {
+            const header = document.createElement('div');
+            header.className = 'checkpoint-section-header';
+            header.textContent = 'Peak Performance';
+            this.checkpointList.appendChild(header);
+
+            peakCheckpoints.forEach(cp => {
+                const metaStr = fmtMeta(cp.meta);
+                const card = this.createCheckpointCard(
+                    cp.value,
+                    `${cp.algo} Peak Best${avgLabel(cp.meta)}`,
+                    metaStr || 'All-time best performance',
+                    'badge-peak',
+                    'Peak'
+                );
+                this.checkpointList.appendChild(card);
             });
-        });
+        }
+
+        // --- Best Replay ---
+        if (bestReplay) {
+            const header = document.createElement('div');
+            header.className = 'checkpoint-section-header';
+            header.textContent = 'Replay';
+            this.checkpointList.appendChild(header);
+
+            const parts = [];
+            if (bestReplay.length != null) parts.push(`Length: ${bestReplay.length}`);
+            if (bestReplay.score != null) parts.push(`Score: ${bestReplay.score}`);
+            const card = this.createCheckpointCard(
+                '__best_replay__',
+                'Watch Best Game Ever',
+                parts.join(' · ') || 'Recorded best game',
+                'badge-replay',
+                'Replay'
+            );
+            this.checkpointList.appendChild(card);
+        }
+
+        // --- Current Model ---
+        if (mainCheckpoints.length > 0) {
+            const header = document.createElement('div');
+            header.className = 'checkpoint-section-header';
+            header.textContent = 'Current Model';
+            this.checkpointList.appendChild(header);
+
+            mainCheckpoints.forEach(cp => {
+                const metaStr = fmtMeta(cp.meta);
+                const card = this.createCheckpointCard(
+                    cp.value,
+                    `${cp.algo} - Current Best${avgLabel(cp.meta)}`,
+                    metaStr || cp.value
+                );
+                this.checkpointList.appendChild(card);
+            });
+        }
+
+        // --- Default Agent (always at bottom) ---
+        const defaultCard = this.createCheckpointCard(
+            '',
+            'Default Agent (Heuristic)',
+            'Rule-based fallback'
+        );
+        this.checkpointList.appendChild(defaultCard);
+
+        // --- Earlier Runs (collapsed) ---
+        if (sortedTimestamps.length > 1) {
+            const earlierRuns = sortedTimestamps.slice(1);
+            const totalEarlier = earlierRuns.reduce((sum, ts) => sum + runs[ts].stages.length, 0);
+
+            const toggle = document.createElement('div');
+            toggle.className = 'checkpoint-section-toggle';
+            toggle.innerHTML = `<span class="arrow">&#9654;</span> Earlier Runs (${totalEarlier})`;
+
+            const itemsContainer = document.createElement('div');
+            itemsContainer.className = 'checkpoint-section-items';
+
+            toggle.addEventListener('click', () => {
+                toggle.classList.toggle('expanded');
+                itemsContainer.classList.toggle('expanded');
+            });
+
+            this.checkpointList.appendChild(toggle);
+            this.checkpointList.appendChild(itemsContainer);
+
+            const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+            earlierRuns.forEach(ts => {
+                const run = runs[ts];
+                run.stages.sort((a, b) => b.stage - a.stage);
+
+                const month = parseInt(run.dateStr.substring(4, 6));
+                const day = parseInt(run.dateStr.substring(6, 8));
+                const hour = parseInt(run.timeStr.substring(0, 2));
+                const min = run.timeStr.substring(2, 4);
+                const ampm = hour >= 12 ? 'PM' : 'AM';
+                const hour12 = hour % 12 || 12;
+                const dateLabel = `${monthNames[month-1]} ${day} ${hour12}:${min}${ampm}`;
+
+                run.stages.forEach(item => {
+                    const ms = fmtMeta(item.meta);
+                    const sub = `${dateLabel} · Stage ${item.stage}/10` + (ms ? ` · ${ms}` : '');
+                    const card = this.createCheckpointCard(item.value, `${run.algo} Stage ${item.stage}${avgLabel(item.meta)}`, sub);
+                    itemsContainer.appendChild(card);
+                });
+            });
+        }
+
+        // --- Auto-select ---
+        this.selectCheckpointCard(autoSelectValue);
     }
 
     /**
@@ -533,7 +683,7 @@ class GameController {
 
         // Add checkpoint if in agent mode (optional - can use default agent)
         if (this.currentMode === 'agent') {
-            const checkpoint = this.checkpointSelect.value;
+            const checkpoint = this.selectedCheckpoint;
             
             // Special case: Best Replay mode
             if (checkpoint === '__best_replay__') {
@@ -1108,17 +1258,23 @@ class GameController {
     /**
      * Start a new game (play again)
      */
-    playAgain() {
+    async playAgain() {
         this.gameOverOverlay.classList.remove('visible');
         this.playerNameInput.value = '';
-        
+
         // Restore previous mode and checkpoint if it was agent mode
         if (this.lastMode === 'agent') {
-            // Set value before setMode so fetchCheckpoints preserves it
+            this.currentMode = 'agent';
+            this.playModeBtn.classList.remove('active');
+            this.watchModeBtn.classList.add('active');
+            this.checkpointGroup.classList.add('visible');
+            this.startBtn.textContent = 'Watch Agent';
+
+            // Fetch and wait for it to complete before restoring selection
+            await this.fetchCheckpoints();
             if (this.lastCheckpoint) {
-                this.checkpointSelect.value = this.lastCheckpoint;
+                this.selectCheckpointCard(this.lastCheckpoint);
             }
-            this.setMode('agent');
         }
 
         this.startGame();

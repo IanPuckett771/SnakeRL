@@ -38,14 +38,37 @@ async def serve_index():
     return {"error": "index.html not found"}
 
 
+def _validate_checkpoint(name: str) -> bool:
+    """Test-load a checkpoint to see if AgentInterface can use it."""
+    agent = AgentInterface()
+    return agent.load_checkpoint(str(CHECKPOINTS_DIR / name))
+
+
+# Pre-validate all checkpoints at import time so the first request is fast.
+# New files (added after server start) are validated on first access.
+_checkpoint_valid_cache: dict[str, bool] = {}
+for _name in AgentInterface.list_checkpoints(str(CHECKPOINTS_DIR)):
+    _checkpoint_valid_cache[_name] = _validate_checkpoint(_name)
+
+
 @app.get("/checkpoints")
 async def get_checkpoints():
-    """Return list of available checkpoints with metadata and best-replay availability."""
+    """Return list of available checkpoints with metadata and best-replay availability.
+
+    Only includes checkpoints that AgentInterface can actually load.
+    """
     filenames = AgentInterface.list_checkpoints(str(CHECKPOINTS_DIR))
+
+    valid_filenames = []
+    for name in filenames:
+        if name not in _checkpoint_valid_cache:
+            _checkpoint_valid_cache[name] = _validate_checkpoint(name)
+        if _checkpoint_valid_cache[name]:
+            valid_filenames.append(name)
 
     # Build checkpoint list with sidecar metadata
     checkpoints = []
-    for name in filenames:
+    for name in valid_filenames:
         entry = {"name": name}
         meta_path = CHECKPOINTS_DIR / (name + ".meta.json")
         if meta_path.exists():

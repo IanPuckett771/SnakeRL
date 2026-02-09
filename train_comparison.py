@@ -195,6 +195,17 @@ def train_algorithm(agent, algorithm_name, duration_seconds=60, use_wandb=True,
                     stage += 1
                     checkpoint_path = checkpoint_dir / f"{checkpoint_prefix}_stage{stage:02d}.pt"
                     agent.save_checkpoint(str(checkpoint_path))
+                    # Write sidecar metadata
+                    meta_path = checkpoint_dir / f"{checkpoint_path.name}.meta.json"
+                    try:
+                        with open(meta_path, 'w') as mf:
+                            json.dump({
+                                "avg_snake_length": round(float(avg_snake_length), 1),
+                                "max_snake_length": int(max(snake_lengths[-log_interval:]) if snake_lengths else 0),
+                                "avg_score": round(float(avg_score), 1),
+                            }, mf)
+                    except Exception:
+                        pass
                     last_checkpoint_time = time.time()
                     print(f"  -> Saved checkpoint stage {stage}/{num_stages}: {checkpoint_path.name} (Avg Score: {avg_score:.2f})")
                 
@@ -239,6 +250,22 @@ def train_algorithm(agent, algorithm_name, duration_seconds=60, use_wandb=True,
         # Also save as the main checkpoint for backward compatibility (overwrites previous)
         main_checkpoint_path = checkpoint_dir / f"{prefix_name}_agent.pt"
         agent.save_checkpoint(str(main_checkpoint_path))
+
+        # Write sidecar metadata for final checkpoints
+        final_avg_snake = float(np.mean(snake_lengths[-50:])) if snake_lengths else 0
+        final_max_snake = int(max(snake_lengths[-50:])) if snake_lengths else 0
+        final_avg = float(np.mean(scores[-50:])) if scores else 0
+        final_meta = {
+            "avg_snake_length": round(final_avg_snake, 1),
+            "max_snake_length": final_max_snake,
+            "avg_score": round(final_avg, 1),
+        }
+        for cp in [final_checkpoint_path, main_checkpoint_path]:
+            try:
+                with open(checkpoint_dir / f"{cp.name}.meta.json", 'w') as mf:
+                    json.dump(final_meta, mf)
+            except Exception:
+                pass
         
         # Final statistics
         final_avg_score = np.mean(scores[-50:]) if len(scores) >= 50 else np.mean(scores) if scores else 0
